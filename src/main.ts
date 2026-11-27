@@ -7959,7 +7959,13 @@ function mechanismFactsHtml(family: string): string {
   return `<dl class="help-mech">${rows.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>`;
 }
 
-function openProviderHelp(fam: string) {
+let dismissProviderHelp: (() => void) | undefined;
+
+function openProviderHelp(
+  fam: string,
+  opener = document.activeElement instanceof HTMLElement ? document.activeElement : null,
+  returnSelector?: string,
+) {
   const def = providerDefinition(fam);
   const keyUrl = getApiKeyLink(fam);
   // What this provider actually accepts, from the curated table — a family
@@ -8005,130 +8011,71 @@ function openProviderHelp(fam: string) {
     { label: t("customize.helpMechSource"), value: hosts, mono: true },
   ];
 
-  const overlay = document.createElement("div");
-  overlay.id = "confirm-overlay";
-  overlay.innerHTML = `
-    <div id="confirm-box" class="provider-help" role="dialog" aria-modal="true" aria-labelledby="ph-title">
-      <header class="ph-head">
-        <span class="ph-icon" aria-hidden="true">${icon}</span>
-        <div class="ph-heading">
-          <h3 id="ph-title">${escapeHtml(providerDisplayName(fam))}</h3>
-          <span class="ph-sub">${escapeHtml(t("customize.helpMenu"))}<span class="ph-sep">·</span><span class="ph-kind">${escapeHtml(badge)}</span></span>
-        </div>
-        <button type="button" class="ph-close" data-help-close aria-label="${escapeHtml(t("settings.close"))}">${uiIcon("x")}</button>
-      </header>
-      <div class="ph-body">
-        <dl class="ph-facts">
-          ${facts.map((fact) => `<div><dt>${escapeHtml(fact.label)}</dt><dd${fact.mono ? ' class="mono"' : ""}>${escapeHtml(fact.value)}</dd></div>`).join("")}
-        </dl>
-        <section class="ph-section">
-          <h4>${escapeHtml(t("customize.helpStepsTitle"))}</h4>
-          <ol class="ph-steps">${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol>
-        </section>
-        <details class="ph-disclosure">
-          <summary>
-            <span class="ph-disclosure-leading" aria-hidden="true">${uiIcon("info")}</span>
-            <span class="ph-disclosure-label">${escapeHtml(t("customize.helpDetailsTitle"))}</span>
-            <span class="ph-disclosure-chevron" aria-hidden="true">${uiIcon("caretDown")}</span>
-          </summary>
-          <div class="ph-disclosure-body">
-            <h4>${escapeHtml(t("provider.help.principle"))}</h4>
-            <p>${escapeHtml(t(remote ? "provider.principle.remote" : "provider.principle.local"))}</p>
-            <h4>${escapeHtml(t("provider.help.boundary"))}</h4>
-            <p>${escapeHtml(t(mech?.limitsKey ?? "provider.limit.general"))}</p>
-          </div>
-        </details>
-        ${links.length ? `<div class="ph-links">${links.map((l) => `<a href="${escapeHtml(l.url)}" target="_blank" rel="noreferrer">${escapeHtml(l.label)} ↗</a>`).join("")}</div>` : ""}
-        <div class="ph-actions">
-          <div class="ph-status" data-help-status aria-live="polite"></div>
-          <button type="button" class="ph-btn ghost" data-help-close>${escapeHtml(t("settings.close"))}</button>
-          <button type="button" class="ph-btn primary" id="help-test">${escapeHtml(t("customize.helpTest"))}</button>
-        </div>
-      </div>
-    </div>`;
-
-  const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  const status = overlay.querySelector<HTMLElement>("[data-help-status]")!;
-  const testBtn = overlay.querySelector<HTMLButtonElement>("#help-test")!;
-  const setStatus = (
-    tone: "idle" | "testing" | "ok" | "warn" | "bad",
-    text: string,
-    detail = "",
-  ) => {
-    status.className = `ph-status is-${tone}`;
-    status.title = detail;
-    status.innerHTML = `${tone === "idle" ? "" : '<span class="ph-status-dot" aria-hidden="true"></span>'}${escapeHtml(text)}`;
+  dismissProviderHelp?.();
+  let unmount: (() => void) | undefined;
+  const release = () => {
+    if (dismissProviderHelp === dismiss) dismissProviderHelp = undefined;
   };
-
-  const close = () => {
-    overlay.remove();
-    document.removeEventListener("keydown", onKey, true);
-    opener?.focus();
+  const dismiss = () => {
+    release();
+    unmount?.();
   };
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      close();
-      return;
-    }
-    if (e.key !== "Tab") return;
-    const focusable = [...overlay.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), a[href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])',
-    )];
-    if (!focusable.length) return;
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (e.shiftKey && document.activeElement === first) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault();
-      first.focus();
-    }
-  };
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay || (e.target as HTMLElement).closest("[data-help-close]")) close();
-  });
-  testBtn.addEventListener("click", () => {
-    testBtn.disabled = true;
-    testBtn.textContent = t("customize.helpTesting");
-    setStatus("testing", t("customize.helpTesting"));
-    invoke<string>("test_provider", { providerId: fam })
-      .then((res) => {
-        if (!overlay.isConnected) return;
-        if (res.startsWith("ok:")) {
-          setStatus("ok", testProviderLabel(res));
-        } else if (res.startsWith("needs_setup:")) {
-          const hint = res.slice("needs_setup:".length, res.lastIndexOf(":"));
-          setStatus("warn", testProviderLabel(res), displayCardHint(hint));
-        } else {
-          const raw = res.slice(0, res.lastIndexOf(":"));
-          setStatus(
-            "bad",
-            t("card.testFailedWith", { reason: t(`credential.error.${credentialFailure(raw)}`) }),
-            displayCardHint(raw),
-          );
+  dismissProviderHelp = dismiss;
+  void import("./ui/providerHelp").then(({ showProviderHelp }) => {
+    if (dismissProviderHelp !== dismiss) return;
+    unmount = showProviderHelp({
+      name: providerDisplayName(fam),
+      subtitle: t("customize.helpMenu"),
+      badge,
+      icon,
+      closeIcon: uiIcon("x"),
+      infoIcon: uiIcon("info"),
+      chevronIcon: uiIcon("caretDown"),
+      closeLabel: t("settings.close"),
+      testLabel: t("customize.helpTest"),
+      testingLabel: t("customize.helpTesting"),
+      stepsTitle: t("customize.helpStepsTitle"),
+      steps,
+      detailsTitle: t("customize.helpDetailsTitle"),
+      principleTitle: t("provider.help.principle"),
+      principle: t(remote ? "provider.principle.remote" : "provider.principle.local"),
+      boundaryTitle: t("provider.help.boundary"),
+      boundary: t(mech?.limitsKey ?? "provider.limit.general"),
+      facts,
+      links,
+      test: async () => {
+        let response: string;
+        try {
+          response = await invoke<string>("test_provider", { providerId: fam });
+        } catch (err: unknown) {
+          return {
+            tone: "bad",
+            text: t("card.testFailedWith", { reason: t("credential.error.unknown") }),
+            detail: String(err),
+          };
         }
-      })
-      .catch((err: unknown) => {
-        if (overlay.isConnected) {
-          setStatus(
-            "bad",
-            t("card.testFailedWith", { reason: t("credential.error.unknown") }),
-            String(err),
-          );
+        if (response.startsWith("ok:")) {
+          return { tone: "ok", text: testProviderLabel(response) };
         }
-      })
-      .finally(() => {
-        if (!overlay.isConnected) return;
-        testBtn.disabled = false;
-        testBtn.textContent = t("customize.helpTest");
-      });
+        const detail = response.slice(0, response.lastIndexOf(":"));
+        if (response.startsWith("needs_setup:")) {
+          return {
+            tone: "warn",
+            text: testProviderLabel(response),
+            detail: displayCardHint(detail.slice("needs_setup:".length)),
+          };
+        }
+        return {
+          tone: "bad",
+          text: t("card.testFailedWith", { reason: t(`credential.error.${credentialFailure(detail)}`) }),
+          detail: displayCardHint(detail),
+        };
+      },
+    }, () => {
+      if (opener?.isConnected) return opener;
+      return returnSelector ? document.querySelector<HTMLElement>(returnSelector) : null;
+    }, release);
   });
-  document.addEventListener("keydown", onKey, true);
-  document.body.appendChild(overlay);
-  testBtn.focus();
-
 }
 
 /// The dashboard card's group menu — the main-page tagging entry. Lists
@@ -8798,7 +8745,7 @@ function openGroupMenu(
     const helpBtn = (e.target as HTMLElement).closest<HTMLElement>("[data-card-help]");
     if (helpBtn) {
       close();
-      openProviderHelp(helpBtn.dataset.cardHelp!);
+      openProviderHelp(helpBtn.dataset.cardHelp!, anchor, `[data-card-group-menu="${CSS.escape(shownId)}"]`);
       return;
     }
     const configure = (e.target as HTMLElement).closest<HTMLElement>("[data-card-config]");
@@ -19344,7 +19291,26 @@ async function loadFamilyAccounts(family: string): Promise<void> {
 
 function skeyLetter(name: string): string {
   const first = name.trim().charAt(0).toUpperCase();
-  return /[A-Z]/.test(first) ? first : "#";
+  return /^[A-Z]$/.test(first) ? first : "#";
+}
+
+const SKEY_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ#";
+
+function syncSkeyAz(): void {
+  const rail = document.querySelector<HTMLElement>("#skey-az");
+  const scroller = document.querySelector<HTMLElement>("#panel-scroll");
+  if (!rail || !scroller || !rail.getClientRects().length) return;
+  const headings = document.querySelectorAll<HTMLElement>("#panel-keys-rows [data-skey-heading]");
+  const top = scroller.getBoundingClientRect().top + 24;
+  let active = headings[0]?.dataset.skeyHeading;
+  for (const heading of headings) {
+    if (heading.getBoundingClientRect().top > top) break;
+    active = heading.dataset.skeyHeading;
+  }
+  for (const button of rail.querySelectorAll<HTMLButtonElement>("button")) {
+    if (active === button.dataset.skeyLetter) button.setAttribute("aria-current", "location");
+    else button.removeAttribute("aria-current");
+  }
 }
 
 function renderSkeyAz(): void {
@@ -19352,35 +19318,55 @@ function renderSkeyAz(): void {
   const root = document.querySelector<HTMLElement>("#panel-keys-rows");
   if (!rail || !root) return;
   const present = new Set(
-    [...root.querySelectorAll<HTMLElement>("[data-skey-letter]")].map(
-      (row) => row.dataset.skeyLetter ?? "#",
+    [...root.querySelectorAll<HTMLElement>("[data-skey-heading]")].map(
+      (heading) => heading.dataset.skeyHeading,
     ),
   );
-  rail.replaceChildren();
-  for (const letter of "ABCDEFGHIJKLMNOPQRSTUVWXYZ#".split("")) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = letter;
-    button.dataset.skeyLetter = letter;
-    if (!present.has(letter)) {
-      button.dataset.empty = "1";
-      button.className = "empty";
-      button.disabled = true;
+  if (!rail.hasChildNodes()) {
+    for (const letter of SKEY_LETTERS) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = letter;
+      button.dataset.skeyLetter = letter;
+      rail.append(button);
     }
-    rail.append(button);
   }
-  rail.hidden = root.children.length === 0;
+  for (const button of rail.querySelectorAll<HTMLButtonElement>("button")) {
+    button.disabled = !present.has(button.dataset.skeyLetter);
+  }
+  rail.hidden = present.size === 0;
+  syncSkeyAz();
 }
 
 function renderSettingsProviderKeys(): void {
   const root = document.querySelector<HTMLElement>("#panel-keys-rows");
   if (!root) return;
-  root.replaceChildren();
   // A–Z by display name; the rail beside the list follows this exact order.
   const families = settingsCredentialFamilies().sort((a, b) =>
     notedName(a, providerDisplayName(a)).localeCompare(notedName(b, providerDisplayName(b)), "en"),
   );
-  for (const family of families) root.append(settingsKeyRow(family));
+  const groups = new Map<string, HTMLElement[]>();
+  for (const family of families) {
+    const row = settingsKeyRow(family);
+    const letter = row.dataset.skeyLetter!;
+    const rows = groups.get(letter);
+    if (rows) rows.push(row);
+    else groups.set(letter, [row]);
+  }
+  const sections = document.createDocumentFragment();
+  for (const letter of SKEY_LETTERS) {
+    const rows = groups.get(letter);
+    if (!rows) continue;
+    const heading = document.createElement("h3");
+    heading.className = "skey-letter-heading";
+    heading.dataset.skeyHeading = letter;
+    heading.textContent = letter;
+    const group = document.createElement("section");
+    group.className = "skey-letter-group";
+    group.append(heading, ...rows);
+    sections.append(group);
+  }
+  root.replaceChildren(sections);
   renderSkeyAz();
 }
 
@@ -19456,7 +19442,7 @@ function settingsKeyRow(family: string): HTMLElement {
   help.innerHTML = uiIcon("question");
   help.title = t("customize.helpMenu");
   help.setAttribute("aria-label", t("customize.helpMenu"));
-  help.addEventListener("click", () => openProviderHelp(family));
+  help.addEventListener("click", () => openProviderHelp(family, help, `[data-skey-family="${CSS.escape(family)}"] .skey-help`));
   actions.append(help);
   // A single-account web-session family (BibiGPT, OpenDesign) still needs a
   // sign-in control; only families with no credential lane at all stop here.
@@ -20290,6 +20276,29 @@ async function renderProxyStatus(): Promise<void> {
   }
 }
 
+function renderTimeFormatControl(): void {
+  if (!IS_PANEL_FORM) return;
+  const host = document.querySelector<HTMLElement>("#timeformat");
+  if (!host) return;
+  void import("./ui/timeFormat").then(({ renderTimeFormat }) => renderTimeFormat(host, {
+    label: t("settings.timeFormat"),
+    value: config.timeFormat,
+    options: [
+      { value: "auto", label: t("settings.timeAuto") },
+      { value: "12", label: t("settings.time12") },
+      { value: "24", label: t("settings.time24") },
+    ],
+    onChange: (timeFormat) => {
+      const save = patchConfig({ timeFormat });
+      renderTimeFormatControl();
+      void save.then(() => {
+        renderTimeFormatControl();
+        requestRender();
+      });
+    },
+  }));
+}
+
 function applyLocale(): void {
   config.locale = normalizeLocalePref(config.locale);
   try {
@@ -20298,6 +20307,7 @@ function applyLocale(): void {
     /* non-fatal */
   }
   setActiveLocale(resolveLocale(config.locale));
+  renderTimeFormatControl();
   applyStaticI18n();
   if (document.querySelector("#spend-sources-list")) renderSpendSourceRows();
   renderOneNewApiSettings();
@@ -20369,7 +20379,7 @@ async function initSettings(): Promise<void> {
   if (IS_PANEL_FORM) initPanelForm();
   mountSpendSettingsBlocks(
     IS_PANEL_FORM
-      ? document.querySelector<HTMLElement>("#st-general .st-card")
+      ? document.querySelector<HTMLElement>("#st-general-usage .st-card")
       : null,
   );
   // Spend blocks mount after the shell was built; give their rows the same
@@ -20408,12 +20418,6 @@ async function initSettings(): Promise<void> {
       document.querySelector("#status")!.textContent = t("footer.autostartFailed", { err: String(err) });
       autostart.checked = !autostart.checked;
     });
-  });
-
-  const timeFormat = document.querySelector<HTMLSelectElement>("#timeformat")!;
-  timeFormat.value = config.timeFormat;
-  timeFormat.addEventListener("change", () => {
-    void patchConfig({ timeFormat: timeFormat.value as Config["timeFormat"] }).then(requestRender);
   });
 
   const localeSel = document.querySelector<HTMLSelectElement>("#locale")!;
@@ -20908,7 +20912,6 @@ function syncSettingsControls(): void {
     syncSelectPill(el);
   };
   setNum("#interval", String(config.refreshMinutes));
-  setSelect("#timeformat", config.timeFormat);
   setSelect("#locale", config.locale);
   setSelect("#update-frequency", String(config.updateCheckHours ?? 4));
   setCheck("#notify-almost", config.notifyAlmostOut);
@@ -20975,7 +20978,6 @@ function panelRow(labelKey: string, ...controls: HTMLElement[]): HTMLElement {
 const PILL_SELECT_IDS = [
   "locale",
   "appearance",
-  "timeformat",
   "jump-animation",
   "spend-tier-mode",
   "update-frequency",
@@ -21335,6 +21337,7 @@ function activatePanelPage(pageId: string): void {
     else renderStatsPage();
   }
   if (pageId === "skins") renderSkinShop();
+  if (pageId === "usage") syncSkeyAz();
   document.querySelectorAll<HTMLElement>("#panel-nav [data-nav-section]").forEach((section) => {
     section
       .querySelector(".panel-nav-parent")
@@ -21524,7 +21527,7 @@ function buildPanelShell(): void {
     // reload here would throw away whatever the user is typing. The auth
     // view hides the button entirely, and a confirm dialog owns the screen.
     if (isTypingTarget(event.target as Element | null)) return;
-    if (authViewActive || document.querySelector("#confirm-overlay")) return;
+    if (authViewActive || document.querySelector("#confirm-overlay, [data-provider-help-host]")) return;
     event.preventDefault();
     event.stopPropagation();
     applySettingsAndReload();
@@ -21590,8 +21593,15 @@ function buildPanelShell(): void {
   // Pages are switched by the rail (PANEL_PAGES), not a horizontal tab bar.
 
   // --- General: adopted controls + the new dual-form controls --------------
-  const general = panelBlock("st-general", "settings.general", "panel.desc.general");
-  const generalCard = general.body;
+  const generalPage = document.createElement("div");
+  generalPage.id = "st-general";
+  generalPage.className = "general-settings";
+  const appearance = panelBlock("st-general-appearance", "settings.appearance");
+  const windowSettings = panelBlock("st-general-window", "settings.groupWindow");
+  const usageSettings = panelBlock("st-general-usage", "settings.groupUsageDisplay");
+  const toolsSettings = panelBlock("st-general-tools", "settings.groupSetupTools");
+  const backupSettings = panelBlock("st-general-backup", "settings.backup");
+  const generalCard = appearance.body;
   const skinsSection = document.createElement("section");
   skinsSection.id = "st-skins";
   skinsSection.className = "st-block skin-shop";
@@ -21770,8 +21780,9 @@ function buildPanelShell(): void {
   meterPill.setAttribute("aria-label", t("settings.meterMode"));
   const meterRow = panelRowDesc("settings.meterMode", "settings.desc.meterMode", meterPill);
   const fontRow = document.querySelector("#ui-font-cjk")?.closest(".set-row");
-  if (fontRow) fontRow.after(textSizeRow, codeFontRow, colorblindRow, meterRow);
-  else generalCard.append(textSizeRow, codeFontRow, colorblindRow, meterRow);
+  if (fontRow) fontRow.after(textSizeRow, codeFontRow, colorblindRow);
+  else generalCard.append(textSizeRow, codeFontRow, colorblindRow);
+  usageSettings.body.append(meterRow);
   // The rows show these hints as visible descriptions already; a hover
   // tooltip on top of that would say the same thing twice.
   for (const id of ["ui-font", "ui-font-cjk"]) {
@@ -21788,20 +21799,20 @@ function buildPanelShell(): void {
   adoptSwitch("glass", "settings.glass", "settings.glassTip", generalCard);
   adoptSwitch("reduce-anim", "settings.reduceAnim", "settings.reduceAnimTip", generalCard);
   const splashReplay = document.querySelector<HTMLElement>("#splash-replay");
-  adoptSwitch("startup-anim", "settings.startupAnim", "settings.startupAnimTip", generalCard, splashReplay ? [splashReplay] : []);
-  adoptControl("jump-animation", "settings.jumpAnimation", "settings.desc.jumpAnimation");
+  adoptSwitch("startup-anim", "settings.startupAnim", "settings.startupAnimTip", windowSettings.body, splashReplay ? [splashReplay] : []);
+  adoptControl("jump-animation", "settings.jumpAnimation", "settings.desc.jumpAnimation", [], windowSettings.body);
   const intervalUnit = document.createElement("span");
   intervalUnit.className = "unit";
   intervalUnit.dataset.i18n = "settings.min";
   intervalUnit.textContent = t("settings.min");
-  adoptControl("interval", "settings.refreshEvery", "settings.desc.refresh", [intervalUnit]);
-  adoptControl("pinned", "settings.trayShows", "settings.desc.pinned");
-  adoptControl("timeformat", "settings.timeFormat", "settings.desc.timeFormat");
-  adoptSwitch("show-total-spend", "settings.showSpend", "settings.desc.showSpend", generalCard);
+  adoptControl("interval", "settings.refreshEvery", "settings.desc.refresh", [intervalUnit], usageSettings.body);
+  adoptControl("pinned", "settings.trayShows", "settings.desc.pinned", [], windowSettings.body);
+  adoptControl("timeformat", "settings.timeFormat", "settings.desc.timeFormat", [], usageSettings.body);
+  adoptSwitch("show-total-spend", "settings.showSpend", "settings.desc.showSpend", usageSettings.body);
   const tierModeControl = document.querySelector<HTMLElement>("#spend-tier-mode");
   if (tierModeControl) {
     const modeRow = panelRowDesc("settings.spendTiers", "settings.desc.spendTiers", tierModeControl);
-    generalCard.append(modeRow);
+    usageSettings.body.append(modeRow);
     tierModeControl.closest<HTMLElement>(".setting-row")?.remove();
     const customRow = document.querySelector<HTMLElement>("#spend-tier-custom");
     if (customRow) {
@@ -21815,26 +21826,22 @@ function buildPanelShell(): void {
         wrap,
       );
       customTierRow.id = "st-spend-tier-custom";
-      generalCard.append(customTierRow);
+      usageSettings.body.append(customTierRow);
       customRow.remove();
     }
   }
-  adoptSwitch("experimental-features", "settings.experimental", "settings.experimentalTip", generalCard);
-  adoptSwitch("overview-cat-full", "settings.overviewCatFull", "settings.overviewCatFullTip", generalCard);
-  adoptSwitch("qoder-checkin", "settings.qoderCheckin", "settings.qoderCheckinTip", generalCard);
-  adoptControl("install-agent-skill", "settings.agentSkill", "settings.agentSkillTip");
+  adoptSwitch("experimental-features", "settings.experimental", "settings.experimentalTip", toolsSettings.body);
+  adoptSwitch("overview-cat-full", "settings.overviewCatFull", "settings.overviewCatFullTip", usageSettings.body);
+  adoptSwitch("qoder-checkin", "settings.qoderCheckin", "settings.qoderCheckinTip", toolsSettings.body);
+  adoptControl("install-agent-skill", "settings.agentSkill", "settings.agentSkillTip", [], toolsSettings.body);
   const shortcutEntry = document.createElement("button");
   shortcutEntry.type = "button";
   shortcutEntry.className = "mini-btn";
   shortcutEntry.dataset.i18n = "settings.manage";
   shortcutEntry.textContent = t("settings.manage");
-  shortcutEntry.addEventListener("click", () => {
-    document
-      .querySelector("#st-shortcuts")
-      ?.scrollIntoView({ behavior: reduceMotion() ? "auto" : scrollBehavior() });
-  });
-  generalCard.append(panelRow("settings.shortcutManage", shortcutEntry));
-  adoptSwitch("autostart", "settings.startWithWindows", "settings.desc.autostart", generalCard);
+  shortcutEntry.addEventListener("click", () => activatePanelPage("shortcuts"));
+  windowSettings.body.append(panelRow("settings.shortcutManage", shortcutEntry));
+  adoptSwitch("autostart", "settings.startWithWindows", "settings.desc.autostart", windowSettings.body);
   // Stored-only for now: the popover already launches hidden, so the flag
   // carries no extra behavior until the panel form grows auto-open-at-login
   // semantics. The tooltip says exactly that.
@@ -21845,7 +21852,7 @@ function buildPanelShell(): void {
   silentStart.addEventListener("change", () => {
     void patchConfig({ silentStart: silentStart.checked }).catch(() => {});
   });
-  generalCard.append(panelSwitchRow("settings.silentStart", "settings.silentStartTip", silentStart));
+  windowSettings.body.append(panelSwitchRow("settings.silentStart", "settings.silentStartTip", silentStart));
   const hideUnconfigured = document.createElement("input");
   hideUnconfigured.id = "st-hide-unconfigured";
   hideUnconfigured.type = "checkbox";
@@ -21853,7 +21860,7 @@ function buildPanelShell(): void {
   hideUnconfigured.addEventListener("change", () => {
     void patchConfig({ hideUnconfigured: hideUnconfigured.checked }).then(requestRender);
   });
-  generalCard.append(panelSwitchRow("settings.hideUnconfigured", "settings.hideUnconfiguredTip", hideUnconfigured));
+  usageSettings.body.append(panelSwitchRow("settings.hideUnconfigured", "settings.hideUnconfiguredTip", hideUnconfigured));
   const spendShowAll = document.createElement("input");
   spendShowAll.id = "st-spend-show-all";
   spendShowAll.type = "checkbox";
@@ -21861,7 +21868,7 @@ function buildPanelShell(): void {
   spendShowAll.addEventListener("change", () => {
     void patchConfig({ spendShowAll: spendShowAll.checked }).then(requestRender);
   });
-  generalCard.append(panelSwitchRow("settings.spendShowAll", "settings.spendShowAllTip", spendShowAll));
+  usageSettings.body.append(panelSwitchRow("settings.spendShowAll", "settings.spendShowAllTip", spendShowAll));
   const rescanSources = document.createElement("button");
   rescanSources.type = "button";
   rescanSources.className = "mini-btn";
@@ -21895,7 +21902,7 @@ function buildPanelShell(): void {
   const sourceActions = document.createElement("div");
   sourceActions.className = "set-row__inline-fields";
   sourceActions.append(rescanSources, redetect, importFromTools);
-  generalCard.append(panelRowDesc("settings.sourceScan", "settings.desc.sourceScan", sourceActions));
+  toolsSettings.body.append(panelRowDesc("settings.sourceScan", "settings.desc.sourceScan", sourceActions));
   const formPill = pillControl<"floating" | "panel">(
     [
       { value: "floating", label: t("settings.windowFormFloating") },
@@ -21923,14 +21930,14 @@ function buildPanelShell(): void {
     },
   );
   formPill.setAttribute("aria-label", t("settings.windowForm"));
-  generalCard.append(panelRowDesc("settings.windowForm", "settings.desc.windowForm", formPill));
+  windowSettings.body.append(panelRowDesc("settings.windowForm", "settings.desc.windowForm", formPill));
   const resizeToggle = document.createElement("input");
   resizeToggle.type = "checkbox";
   resizeToggle.checked = config.windowResizeEnabled !== false;
   resizeToggle.addEventListener("change", () => {
     void patchConfig({ windowResizeEnabled: resizeToggle.checked }).then(applyWindowResize);
   });
-  generalCard.append(
+  windowSettings.body.append(
     panelSwitchRow("settings.windowResize", "settings.windowResizeTip", resizeToggle),
   );
   const sizeReset = document.createElement("button");
@@ -21939,7 +21946,7 @@ function buildPanelShell(): void {
   sizeReset.dataset.i18n = "settings.windowSizeReset";
   sizeReset.textContent = t("settings.windowSizeReset");
   sizeReset.addEventListener("click", () => void resetPopoverSize());
-  generalCard.append(panelRowDesc("settings.windowSize", "settings.desc.windowSize", sizeReset));
+  windowSettings.body.append(panelRowDesc("settings.windowSize", "settings.desc.windowSize", sizeReset));
   // Replay the first-run spotlight tour on demand.
   const replayTour = document.createElement("button");
   replayTour.type = "button";
@@ -21951,15 +21958,10 @@ function buildPanelShell(): void {
     // surface the popover and replay there.
     void invoke("replay_tour").catch(() => {});
   });
-  generalCard.append(panelRowDesc("settings.tourReplayLabel", "settings.desc.tour", replayTour));
+  toolsSettings.body.append(panelRowDesc("settings.tourReplayLabel", "settings.desc.tour", replayTour));
 
   // Local-only encrypted backup. The password is never stored; the backend
   // allowlist excludes proxy and window-layout keys from the snapshot.
-  const backupTitle = document.createElement("div");
-  backupTitle.className = "backup-title";
-  backupTitle.dataset.i18n = "settings.backup";
-  backupTitle.textContent = t("settings.backup");
-  generalCard.append(backupTitle);
   const backupAccounts = document.createElement("input");
   backupAccounts.type = "checkbox";
   backupAccounts.checked = true;
@@ -21968,14 +21970,14 @@ function buildPanelShell(): void {
   backupKeys.type = "checkbox";
   backupKeys.checked = true;
   backupKeys.dataset.backupKeys = "";
-  const backupSettings = document.createElement("input");
-  backupSettings.type = "checkbox";
-  backupSettings.checked = true;
-  backupSettings.dataset.backupSettings = "";
-  generalCard.append(
+  const includeSettings = document.createElement("input");
+  includeSettings.type = "checkbox";
+  includeSettings.checked = true;
+  includeSettings.dataset.backupSettings = "";
+  backupSettings.body.append(
     panelRow("settings.backupAccounts", backupAccounts),
     panelRow("settings.backupKeys", backupKeys),
-    panelRow("settings.backupSettings", backupSettings),
+    panelRow("settings.backupSettings", includeSettings),
   );
   const backupActions = document.createElement("div");
   backupActions.className = "backup-actions";
@@ -21990,14 +21992,14 @@ function buildPanelShell(): void {
   backupImport.textContent = t("settings.backupImport");
   backupImport.addEventListener("click", () => void runBackupImport());
   backupActions.append(backupExport, backupImport);
-  generalCard.append(backupActions);
+  backupSettings.body.append(backupActions);
   const replayOnboarding = document.createElement("button");
   replayOnboarding.type = "button";
   replayOnboarding.className = "mini-btn";
   replayOnboarding.dataset.i18n = "settings.replayOnboardingAction";
   replayOnboarding.textContent = t("settings.replayOnboardingAction");
   replayOnboarding.addEventListener("click", () => startOnboarding(true));
-  generalCard.append(
+  toolsSettings.body.append(
     panelRowDesc(
       "settings.replayOnboarding",
       "settings.desc.replayOnboarding",
@@ -22028,7 +22030,7 @@ function buildPanelShell(): void {
   const skillList = document.createElement("div");
   skillList.className = "skill-usage-list";
   skillUsage.append(skillHead, skillList);
-  generalCard.append(skillUsage);
+  toolsSettings.body.append(skillUsage);
   const renderSkillUsage = (rows: Array<{ skill: string; calls: number; tokens: number; cost: number }>): void => {
     if (!rows.length) {
       skillList.innerHTML = `<p class="settings-note">${escapeHtml(t("settings.skillUsageEmpty"))}</p>`;
@@ -22058,7 +22060,11 @@ function buildPanelShell(): void {
   skillRefresh.addEventListener("click", () => void loadSkillUsage(true));
   if (IS_PANEL_FORM) void loadSkillUsage();
 
-  settingsView.append(general.section, skinsSection);
+  generalPage.append(
+    appearance.section, windowSettings.section, usageSettings.section,
+    toolsSettings.section, backupSettings.section,
+  );
+  settingsView.append(generalPage, skinsSection);
 
   // --- Keys page: provider credentials + the MCP/search vault ------------
   // Two cards under one page id so the tab toggle keeps working: the
@@ -22079,16 +22085,19 @@ function buildPanelShell(): void {
   const azRail = document.createElement("nav");
   azRail.id = "skey-az";
   azRail.className = "skey-az";
+  azRail.dataset.i18nAria = "settings.providerIndex";
+  azRail.setAttribute("aria-label", t("settings.providerIndex"));
+  scroll.addEventListener("scroll", syncSkeyAz, { passive: true });
   azRail.hidden = true;
   azRail.addEventListener("click", (event) => {
-    const button = (event.target as HTMLElement).closest<HTMLElement>("[data-skey-letter]");
-    if (!button || button.dataset.empty === "1") return;
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-skey-letter]");
+    if (!button || button.disabled) return;
     const letter = button.dataset.skeyLetter!;
     document
       .querySelector<HTMLElement>(
-        `#panel-keys-rows [data-skey-letter="${CSS.escape(letter)}"]`,
+        `#panel-keys-rows [data-skey-heading="${CSS.escape(letter)}"]`,
       )
-      ?.scrollIntoView({ block: "start", behavior: "smooth" });
+      ?.scrollIntoView({ block: "start", behavior: reduceMotion() ? "auto" : scrollBehavior() });
   });
   const providerKeys = panelBlock("st-kv-providers", "settings.keysProviders", "panel.desc.usage");
   const pkPad = document.createElement("div");
@@ -22110,7 +22119,10 @@ function buildPanelShell(): void {
     if (el) kvPad.append(el);
   }
   mcpKeys.body.append(kvPad);
-  keyPage.append(kvHead, azRail, providerKeys.section, mcpKeys.section);
+  const keyDirectory = document.createElement("div");
+  keyDirectory.className = "skey-directory";
+  keyDirectory.append(azRail, providerKeys.section);
+  keyPage.append(kvHead, keyDirectory, mcpKeys.section);
   settingsView.append(keyPage);
 
   // --- Usage statistics: KPI strip, 52-week heatmap, model charts, and the
@@ -24085,7 +24097,7 @@ window.addEventListener("DOMContentLoaded", () => {
   // handler is never preventDefault-ed.
   let shiftAlone = false;
   const canCyclePeriod = () => isDashboardActive() && !customizeOpen &&
-    !document.querySelector(".group-menu-overlay, #confirm-overlay") &&
+    !document.querySelector(".group-menu-overlay, #confirm-overlay, [data-provider-help-host]") &&
     !isTypingTarget(document.activeElement);
   const toggleExpiring = () => {
     overviewExpiringOpen = !overviewExpiringOpen;
@@ -24129,7 +24141,7 @@ window.addEventListener("DOMContentLoaded", () => {
       isImeNoise(event) ||
       isModifierOnly(event) ||
       isTypingTarget(document.activeElement) ||
-      document.querySelector("#confirm-overlay, .group-menu-overlay")
+      document.querySelector("#confirm-overlay, .group-menu-overlay, [data-provider-help-host]")
     ) {
       return false;
     }
@@ -24175,6 +24187,7 @@ window.addEventListener("DOMContentLoaded", () => {
       // IME: Esc cancels an in-flight composition (candidate window) — it
       // must not double as "close the panel" / "hide the window".
       if (e.isComposing || e.keyCode === 229) return;
+      if (document.querySelector("[data-provider-help-host]")) return;
       if (handleSkinShopEscape()) return;
       if (customizeOpen) {
         setDrawer(false);
@@ -24600,7 +24613,16 @@ document.querySelector("#settings-btn")!.addEventListener("click", (event) => {
       return;
     }
     const help = target.closest<HTMLElement>("[data-provider-help]");
-    if (help) { openProviderHelp(help.dataset.providerHelp!); return; }
+    if (help) {
+      const family = help.dataset.providerHelp!;
+      const card = help.closest<HTMLElement>("article[data-provider]");
+      const actionGroup = help.closest(".quota-state-detail-actions") ? ".quota-state-detail-actions" : ".quota-state-actions";
+      const returnSelector = card
+        ? `article[data-provider="${CSS.escape(card.dataset.provider!)}"] ${actionGroup} [data-provider-help="${CSS.escape(family)}"]`
+        : undefined;
+      openProviderHelp(family, help, returnSelector);
+      return;
+    }
     const needsSetup = target.closest<HTMLElement>("[data-needs-setup]");
     if (needsSetup) {
       // Straight to the place the hint talks about: the provider's own
@@ -25046,6 +25068,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", (event) => {
   void listen("tour-replay", () => {
     setDrawer(false);
     dismissConfirm?.();
+    dismissProviderHelp?.();
     startTour();
   });
   void listen("font-packs-updated", () => {
@@ -25181,6 +25204,7 @@ document.querySelector("#settings-btn")!.addEventListener("click", (event) => {
     // place. Stale dialogs still go — only the view is remembered.
     restorePopoverView();
     dismissConfirm?.();
+    dismissProviderHelp?.();
     dismissWhatsNew?.(pendingFontGuide !== "skip");
     userSelectedAccountFor.clear();
     // Release notes + configuration notice present on the first open after

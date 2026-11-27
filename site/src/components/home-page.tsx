@@ -12,12 +12,12 @@ export function HomePage({ lang }: { lang: Lang }) {
   return (
     <>
       <Hero lang={lang} />
-      <AgentWorkflow lang={lang} />
       <PanelAnatomy lang={lang} />
+      <AgentWorkflow lang={lang} />
       <Trust lang={lang} />
       <FAQ lang={lang} />
       <DownloadSection lang={lang} />
-      <Background variant="bottom" className="mx-4 mb-12 sm:mx-6">
+      <Background variant="bottom" className="mx-auto mb-12 w-[calc(100%_-_2rem)] max-w-[1320px] sm:w-[calc(100%_-_3rem)]">
         <ClosingCta lang={lang} />
       </Background>
     </>

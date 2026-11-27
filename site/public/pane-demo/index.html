@@ -4,24 +4,26 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Pane</title>
-  <link rel="stylesheet" href="/demo-frame.css?v=9"><script>(function(){window.requestAnimationFrame=function(cb){return window.setTimeout(function(){cb(window.performance.now())},16)};window.cancelAnimationFrame=function(id){window.clearTimeout(id)};document.addEventListener("DOMContentLoaded",function(){setTimeout(function(){if(document.querySelector(".skeleton-card")){var b=document.querySelector("#refresh");if(b)b.click()}},900)})})()</script>  <script type="module" crossorigin src="/pane-demo/assets/index-CbmwmbJe.js"></script>
-  <link rel="stylesheet" crossorigin href="/pane-demo/assets/index-Cipnh1h1.css">
+  <link rel="stylesheet" href="/demo-frame.css?v=9"><script>(function(){window.requestAnimationFrame=function(cb){return window.setTimeout(function(){cb(window.performance.now())},16)};window.cancelAnimationFrame=function(id){window.clearTimeout(id)};document.addEventListener("DOMContentLoaded",function(){setTimeout(function(){if(document.querySelector(".skeleton-card")){var b=document.querySelector("#refresh");if(b)b.click()}},900)})})()</script>  <script type="module" crossorigin src="/pane-demo/assets/index-EZivmjGk.js"></script>
+  <link rel="stylesheet" crossorigin href="/pane-demo/assets/index-lunsWbEX.css">
 </head>
 
   <body>
     <!-- Independent of the module bundle: a failed resource load must leave
          visible recovery guidance instead of a permanently hidden body. -->
     <div id="boot-fallback" role="status" aria-live="polite">
-      <svg class="boot-meter" viewBox="0 0 64 64" width="64" height="64" aria-hidden="true">
-        <path class="boot-meter-track" d="M12 47a25 25 0 1 1 40 0" />
-        <path class="boot-meter-signal" d="M12 47a25 25 0 1 1 40 0" />
-        <g class="boot-meter-needle"><path d="M32 32l15-12"/><circle cx="32" cy="32" r="3"/></g>
-      </svg>
-      <strong class="boot-name">Pane</strong>
-      <p>正在加载 Pane… / Loading Pane…</p>
-      <div class="boot-recovery">
-        <p>加载仍未完成，请重新加载。 / Still loading. Please reload.</p>
-        <a href="/">重新加载 / Reload</a>
+      <div class="boot-content">
+        <img class="boot-mark" src="data:image/svg+xml,%3csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20512%20512'%20width='512'%20height='512'%3e%3cdefs%3e%3clinearGradient%20id='tile'%20x1='0'%20y1='0'%20x2='0'%20y2='1'%3e%3cstop%20offset='0'%20stop-color='%23232a33'/%3e%3cstop%20offset='1'%20stop-color='%2312161c'/%3e%3c/linearGradient%3e%3clinearGradient%20id='arc'%20x1='0'%20y1='1'%20x2='1'%20y2='0'%3e%3cstop%20offset='0'%20stop-color='%233f7ef0'/%3e%3cstop%20offset='1'%20stop-color='%236ea8ff'/%3e%3c/linearGradient%3e%3c/defs%3e%3crect%20width='512'%20height='512'%20rx='112'%20fill='url(%23tile)'/%3e%3cg%20transform='rotate(135%20256%20256)'%3e%3ccircle%20cx='256'%20cy='256'%20r='150'%20fill='none'%20stroke='%232a313c'%20stroke-width='62'%20pathLength='360'%20stroke-dasharray='270%2090'%20stroke-linecap='round'/%3e%3ccircle%20cx='256'%20cy='256'%20r='150'%20fill='none'%20stroke='url(%23arc)'%20stroke-width='62'%20pathLength='360'%20stroke-dasharray='215%20145'%20stroke-linecap='round'/%3e%3c/g%3e%3cline%20x1='256'%20y1='256'%20x2='352'%20y2='188'%20stroke='%23f8fafc'%20stroke-width='34'%20stroke-linecap='round'/%3e%3ccircle%20cx='256'%20cy='256'%20r='46'%20fill='%23f8fafc'/%3e%3c/svg%3e" width="40" height="40" alt="" />
+        <strong class="boot-name">Pane</strong>
+        <p>正在加载 Pane… / Loading Pane…</p>
+        <span class="boot-progress" aria-hidden="true"></span>
+        <div class="boot-recovery">
+          <p>加载仍未完成，请重新加载。 / Still loading. Please reload.</p>
+          <a href="">重新加载 / Reload</a>
+        </div>
+      </div>
+      <div class="boot-settings-skeleton" aria-hidden="true">
+        <span></span><span></span><span></span><span></span>
       </div>
     </div>
     <!-- Liquid-glass lens (prasen.dev original): rounded-rect SDF lens map —
