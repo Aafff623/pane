@@ -12684,8 +12684,8 @@ function openCursorAccountDialog(): void {
 
 function openAccountDialog(family: string, editId?: string): void {
   dismissAccountDialog?.();
-  const overlay = document.createElement("div");
-  overlay.id = "account-overlay";
+  const shell = mountDialogShell({ overlayId: "account-overlay" });
+  const overlay = shell.host;
   if (editId) overlay.dataset.editAccount = editId;
   overlay.innerHTML = `
     <section class="account-dialog" data-account-dialog="${escapeHtml(family)}" role="dialog" aria-modal="true" aria-labelledby="account-dialog-title">
@@ -12728,19 +12728,14 @@ function openAccountDialog(family: string, editId?: string): void {
     </section>`;
 
   let closed = false;
+  // Lifecycle from the shell created at the top of this function. Only the
+  // `dismissAccountDialog` slot stays local, because it is this dialog's own
+  // handle for re-opening.
   const done = () => {
     if (closed) return;
     closed = true;
-    document.removeEventListener("keydown", onKey, true);
-    overlay.remove();
+    shell.close();
     if (dismissAccountDialog === done) dismissAccountDialog = null;
-  };
-  const onKey = (event: KeyboardEvent) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      done();
-    }
   };
   overlay.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
@@ -12769,10 +12764,11 @@ function openAccountDialog(family: string, editId?: string): void {
     }
   });
   dismissAccountDialog = done;
-  document.addEventListener("keydown", onKey, true);
-  document.body.appendChild(overlay);
   const form = overlay.querySelector<HTMLElement>(".account-dialog-form");
   resetAcctTestState(form);
+  // A dialog that never moves focus leaves the keyboard user behind it: the
+  // credential field is the first thing anyone types into.
+  shell.focusFirst(overlay.querySelector<HTMLInputElement>("[data-acct-key]"));
   if (editId) {
     const entry = accountsCache.get(family)?.find((row) => row.id === editId);
     const label = overlay.querySelector<HTMLInputElement>("[data-acct-label]");
