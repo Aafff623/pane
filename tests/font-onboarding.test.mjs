@@ -36,6 +36,10 @@ for (const userClose of [true, false]) {
       pendingFontGuide: 'new', IS_PANEL_FORM: false, dismissWhatsNew: null,
       config: { uiFont: 'MV Boli', welcomeDismissed: false }, appVersion: '0.8.5', WHATS_NEW_VERSIONS: 3,
       document: { hidden: false, querySelector: () => null, createElement: () => overlay, addEventListener() {}, removeEventListener() {}, body: { appendChild() {} } },
+      // The dialog builds itself through the shared shell now. These tests are
+      // about the font-guide state machine, not about the shell, so the stub
+      // hands back the same overlay and a no-op close.
+      mountDialogShell: () => ({ host: overlay, opener: null, close() {}, focusFirst() {} }),
       getVersion: async () => '0.8.5', patchConfig: async (patch) => Object.assign(context.config, patch),
       applyAppearance() {}, maybeStartTour() {}, activeSkin: () => null, skinShopEntries: () => [],
       t: (key) => key, escapeHtml: (text) => text, renderChangelogBody: (body) => body,

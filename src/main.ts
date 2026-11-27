@@ -9149,8 +9149,8 @@ function showChangelogDialog(
   const kind = opts.kind ?? "browse";
   const actions = opts.actions;
   let visibleVersions = kind === "update" ? WHATS_NEW_VERSIONS : sections.length;
-  const overlay = document.createElement("div");
-  overlay.id = "whatsnew-overlay";
+  const shell = mountDialogShell({ overlayId: "whatsnew-overlay" });
+  const overlay = shell.host;
   overlay.innerHTML = `
     <div id="whatsnew-box" role="dialog" aria-modal="true" aria-labelledby="whatsnew-title">
       <header class="wn-head">
@@ -9212,12 +9212,14 @@ function showChangelogDialog(
   });
   renderBody();
   let closed = false;
+  // Lifecycle from the shared shell (Escape, Tab wrap, backdrop, focus return).
+  // `runOnClose` stays local: only this dialog knows whether the notice queue
+  // should resume.
   const close = (runOnClose = true) => {
     if (closed) return;
     closed = true;
     dismissWhatsNew = null;
-    document.removeEventListener("keydown", onKey, true);
-    overlay.remove();
+    shell.close();
     if (runOnClose) opts.onClose?.();
   };
   const done = (userAction = true, accepted = false) => {
@@ -9225,16 +9227,6 @@ function showChangelogDialog(
     close();
   };
   dismissWhatsNew = (userAction = false) => done(userAction);
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      done();
-    }
-  };
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) done();
-  });
   overlay.querySelector("#whatsnew-ok")!.addEventListener("click", () => done(true, true));
   overlay.querySelector("#whatsnew-close")!.addEventListener("click", () => done());
   overlay.querySelector("#whatsnew-cancel")?.addEventListener("click", () => done());
@@ -9248,9 +9240,7 @@ function showChangelogDialog(
     // browse shape instead of an external URL.
     showChangelogDialog(t("dialog.changelog"), parseChangelog(), { onClose: carryOnClose });
   });
-  document.addEventListener("keydown", onKey, true);
-  document.body.appendChild(overlay);
-  overlay.querySelector<HTMLElement>("#whatsnew-ok")?.focus();
+  shell.focusFirst(overlay.querySelector<HTMLElement>("#whatsnew-ok"));
 }
 
 /// The sections a just-updated install hasn't seen yet (newest first,
