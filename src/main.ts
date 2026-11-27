@@ -21077,10 +21077,15 @@ function pillControl<T extends string>(
   options: { value: T; label: string }[],
   current: T,
   onChange: (value: T) => void,
+  label?: string,
 ): HTMLElement {
   const pill = document.createElement("div");
   pill.className = "tabs set-pill";
-  pill.setAttribute("role", "group");
+  // radiogroup, not group: these are mutually exclusive answers to one
+  // question, and that is what tells a screen reader to announce the selection
+  // rather than reading five unrelated buttons.
+  pill.setAttribute("role", "radiogroup");
+  if (label) pill.setAttribute("aria-label", label);
   const thumb = document.createElement("i");
   thumb.className = "tab-thumb";
   thumb.setAttribute("aria-hidden", "true");
@@ -21090,7 +21095,9 @@ function pillControl<T extends string>(
     for (const button of buttons) {
       const on = button.dataset.value === value;
       button.classList.toggle("active", on);
-      button.setAttribute("aria-pressed", String(on));
+      button.setAttribute("aria-checked", String(on));
+      // Roving tabindex: one tab stop for the whole control, arrows move it.
+      button.tabIndex = on ? 0 : -1;
     }
     positionTabThumb(pill);
   };
@@ -21100,6 +21107,7 @@ function pillControl<T extends string>(
     button.className = "tab";
     button.dataset.value = option.value;
     button.textContent = option.label;
+    button.setAttribute("role", "radio");
     button.addEventListener("click", () => {
       if (button.classList.contains("active")) return;
       sync(option.value);
@@ -21108,6 +21116,24 @@ function pillControl<T extends string>(
     pill.append(button);
     buttons.push(button);
   }
+  // Arrow keys / Home / End, the behaviour a radiogroup promises. The
+  // hand-written version only responded to the mouse, so a keyboard user could
+  // tab into the row and then had no way to change the answer.
+  pill.addEventListener("keydown", (event) => {
+    const at = buttons.findIndex((button) => button === document.activeElement);
+    if (at < 0) return;
+    const next =
+      event.key === "Home" ? 0
+        : event.key === "End" ? buttons.length - 1
+          : event.key === "ArrowRight" || event.key === "ArrowDown" ? (at + 1) % buttons.length
+            : event.key === "ArrowLeft" || event.key === "ArrowUp" ? (at - 1 + buttons.length) % buttons.length
+              : -1;
+    if (next < 0) return;
+    event.preventDefault();
+    buttons[next].focus();
+    sync(buttons[next].dataset.value as T);
+    onChange(buttons[next].dataset.value as T);
+  });
   sync(current);
   requestAnimationFrame(() => positionTabThumb(pill));
   new ResizeObserver(() => positionTabThumb(pill)).observe(pill);
@@ -21751,8 +21777,8 @@ function buildPanelShell(): void {
     ],
     (config.uiTextSize ?? "small") as TextSize,
     (value) => setUiTextSize(value),
+    t("settings.textSize"),
   );
-  textSizePill.setAttribute("aria-label", t("settings.textSize"));
   const textSizeRow = panelRowDesc("settings.textSize", "settings.desc.textSize", textSizePill);
   const codeFontInput = document.createElement("input");
   codeFontInput.id = "st-code-font";
@@ -21833,8 +21859,8 @@ function buildPanelShell(): void {
       emitUiPrefs();
       void patchConfig({ colorblindMode: config.colorblindMode }).catch(() => {});
     },
+    t("settings.colorblind"),
   );
-  colorblindPill.setAttribute("aria-label", t("settings.colorblind"));
   const colorblindRow = panelRowDesc("settings.colorblind", "settings.desc.colorblind", colorblindPill);
   // Two bar conventions, one switch: used-fills-up (the original look) is
   // the default; used-drains-away shows how much is left instead. The text
