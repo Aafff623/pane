@@ -12464,8 +12464,8 @@ function labelForAccount(id: string, list: AccountEntry[], fallback = ""): strin
 /// import (cockpit-compatible field aliases).
 function openCursorAccountDialog(): void {
   dismissAccountDialog?.();
-  const overlay = document.createElement("div");
-  overlay.id = "account-overlay";
+  const shell = mountDialogShell({ overlayId: "account-overlay" });
+  const overlay = shell.host;
   overlay.innerHTML = `
     <section class="account-dialog" role="dialog" aria-modal="true" aria-labelledby="cursor-account-title">
       <div class="account-dialog-head">
@@ -12508,24 +12508,16 @@ function openCursorAccountDialog(): void {
 
   let closed = false;
   let activeLoginId: string | null = null;
+  // The shell owns Escape, Tab wrap, backdrop and focus return; this dialog
+  // keeps its own OAuth cancel and the `dismissAccountDialog` slot.
   const done = () => {
     if (closed) return;
     closed = true;
     stopOauthPoll();
-    document.removeEventListener("keydown", onKey, true);
-    overlay.remove();
+    shell.close();
     if (dismissAccountDialog === done) dismissAccountDialog = null;
   };
-  const onKey = (event: KeyboardEvent) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      done();
-    }
-  };
   dismissAccountDialog = done;
-  document.addEventListener("keydown", onKey, true);
-  document.body.appendChild(overlay);
 
   // Shared success tail for all three import paths: refresh the account
   // list, close the dialog, force a quota refresh.
