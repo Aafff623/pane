@@ -12471,8 +12471,8 @@ function openCursorAccountDialog(): void {
     if (closed) return;
     closed = true;
     stopOauthPoll();
-    shell.close();
     if (dismissAccountDialog === done) dismissAccountDialog = null;
+    shell.close();
   };
   dismissAccountDialog = done;
 
@@ -12683,8 +12683,8 @@ function openAccountDialog(family: string, editId?: string): void {
   const done = () => {
     if (closed) return;
     closed = true;
-    shell.close();
     if (dismissAccountDialog === done) dismissAccountDialog = null;
+    shell.close();
   };
   overlay.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
