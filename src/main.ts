@@ -19296,10 +19296,55 @@ function skeyLetter(name: string): string {
 
 const SKEY_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ#";
 
+/// Place the fixed alphabet rail: beside the 940px reading column when the
+/// margin fits, vertically centred in the panel viewport. `getBoundingClientRect`
+/// returns VISUAL pixels while `style.left/top` are layout pixels, and the shell
+/// runs under CSS `zoom` — so every number is divided back by the scale, the
+/// same conversion `placeMenuAt` needs.
+function placeIndexRail(): void {
+  const rail = document.querySelector<HTMLElement>("#skey-az");
+  const scroller = document.querySelector<HTMLElement>("#panel-scroll");
+  const column = document.querySelector<HTMLElement>("#st-keyvault");
+  if (!rail || !scroller || !column) return;
+  const scale = currentUiScale() || 1;
+  const columnRect = column.getBoundingClientRect();
+  const scrollerRect = scroller.getBoundingClientRect();
+  const railWidth = rail.offsetWidth || 29;
+  const railHeight = rail.offsetHeight || 0;
+
+  // Beside the column when the margin fits, otherwise just inside the scroll
+  // area's right edge. The card column is `max-width: 940px`, so on a narrow
+  // window there is no margin to use and the rail would land on the cards —
+  // `placeIndexRail` reports that case so the page can reserve the gutter
+  // instead (`--rail-gutter`).
+  const beside = columnRect.right + 12;
+  const rightEdge = scrollerRect.right - railWidth - 12;
+  const outside = beside + railWidth <= scrollerRect.right - 8;
+  const left = outside ? beside : rightEdge;
+  rail.style.left = `${Math.round(left / scale)}px`;
+  // Writing this back changes the column width, which `ResizeObserver` reports
+  // as a new size — guard against the feedback loop by only touching the
+  // property when the value actually changes.
+  const gutter = outside ? "0px" : `${Math.round(railWidth + 20)}px`;
+  if (column.style.getPropertyValue("--rail-gutter") !== gutter) {
+    column.style.setProperty("--rail-gutter", gutter);
+  }
+
+  // Vertical centre of the panel viewport, clamped so a short window keeps the
+  // rail fully on screen instead of clipping its top or bottom.
+  const centre = scrollerRect.top + (scrollerRect.height - railHeight) / 2;
+  const min = scrollerRect.top + 12;
+  const max = scrollerRect.bottom - railHeight - 12;
+  const top = Math.min(Math.max(centre, min), Math.max(min, max));
+  rail.style.top = `${Math.round(top / scale)}px`;
+}
+
 function syncSkeyAz(): void {
   const rail = document.querySelector<HTMLElement>("#skey-az");
   const scroller = document.querySelector<HTMLElement>("#panel-scroll");
   if (!rail || !scroller || !rail.getClientRects().length) return;
+  // The rail is `position: fixed`, so scrolling does not move it — only the
+  // active letter changes. Placement runs on resize and on rebuild instead.
   const headings = document.querySelectorAll<HTMLElement>("#panel-keys-rows [data-skey-heading]");
   const top = scroller.getBoundingClientRect().top + 24;
   let active = headings[0]?.dataset.skeyHeading;
@@ -19335,7 +19380,31 @@ function renderSkeyAz(): void {
     button.disabled = !present.has(button.dataset.skeyLetter);
   }
   rail.hidden = present.size === 0;
+  layoutSkeyAz(rail);
+  // Three things move the rail: its own size (the column count flips with panel
+  // height), the scroll area (window resize, nav width), and the page itself.
+  if (!rail.dataset.observed) {
+    rail.dataset.observed = "1";
+    const relayout = () => {
+      layoutSkeyAz(rail);
+      placeIndexRail();
+    };
+    new ResizeObserver(relayout).observe(rail);
+    const scroller = document.querySelector<HTMLElement>("#panel-scroll");
+    if (scroller) new ResizeObserver(relayout).observe(scroller);
+    window.addEventListener("resize", relayout);
+  }
+  placeIndexRail();
   syncSkeyAz();
+}
+
+/// Column flow needs a row count: with `grid-auto-flow: column` and a fixed
+/// column template the browser builds ONE row and lays every letter sideways.
+/// Dividing the total across the columns gives the wrap the index needs.
+function layoutSkeyAz(rail: HTMLElement): void {
+  const columns = Number(getComputedStyle(rail).getPropertyValue("--index-columns")) || 1;
+  const buttons = rail.querySelectorAll("button").length;
+  rail.style.setProperty("--index-rows", String(Math.max(1, Math.ceil(buttons / columns))));
 }
 
 function renderSettingsProviderKeys(): void {

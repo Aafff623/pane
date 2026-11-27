@@ -5,8 +5,11 @@ import vm from 'node:vm';
 import ts from 'typescript';
 const source=readFileSync(new URL('../src/main.ts',import.meta.url),'utf8');
 const styles=readFileSync(new URL('../src/styles.css',import.meta.url),'utf8');
-test('navigation frames use explicit blue for overview and the theme primary for settings',()=>{
- assert.match(styles,/#providers\s+\.navigation-focus-target\s*\{[^}]*--navigation-focus-color:\s*#3b82f6/);
+// Both jump targets follow --primary. The board used to pin #3b82f6 while
+// settings followed the accent, so changing the accent colour left the board's
+// land marker blue and the settings one themed — two answers to one question.
+test('navigation frames follow the theme primary on both surfaces',()=>{
+ assert.match(styles,/#providers\s+\.navigation-focus-target\s*\{[^}]*--navigation-focus-color:\s*var\(--primary\)/);
  assert.match(styles,/#panel-scroll\s+\.navigation-focus-target\s*\{[^}]*--navigation-focus-color:\s*var\(--primary\)/);
  assert.match(styles,/outline:\s*2px solid var\(--navigation-focus-color/);
 });

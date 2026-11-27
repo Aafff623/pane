@@ -2839,24 +2839,37 @@ article.provider.is-folded:hover {
   padding: 8px;
 }
 
+/* Overview jump highlight. Used to hardcode #3b82f6 while the settings side
+   followed --primary, so switching the accent colour left the board's land
+   marker blue and the settings one themed — two answers to the same question. */
 #providers .navigation-focus-target {
-  --navigation-focus-color: #3b82f6;
+  --navigation-focus-color: var(--primary);
 }
+/* Jump-to-section highlight. The old treatment was a 3px blue bar glued to the
+   left edge plus an 8% tint — it read as a stuck scrollbar rather than "this is
+   where you landed", and every AI-built tool ships that same bar. A soft ring
+   says the same thing without competing with the content.
+
+   Static on purpose: an animated-only highlight depends on the keyframes
+   landing last, and a backgrounded window leaves the first frame stuck on
+   screen. */
 #panel-scroll .navigation-focus-target {
   --navigation-focus-color: var(--primary);
-  outline-width: 1px;
-  box-shadow: inset 3px 0 var(--navigation-focus-color);
-  background-color: color-mix(in srgb, var(--primary) 8%, var(--card));
+  outline: none;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--primary) 42%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--primary) 13%, transparent);
+  background-color: color-mix(in srgb, var(--primary) 5%, var(--card));
 }
 .navigation-focus-target {
-  outline: 2px solid var(--navigation-focus-color, #3b82f6);
+  outline: 2px solid var(--navigation-focus-color, var(--primary));
   outline-offset: -2px;
-  box-shadow: inset 0 0 0 2px var(--navigation-focus-color, #3b82f6);
+  box-shadow: inset 0 0 0 2px var(--navigation-focus-color, var(--primary));
   border-radius: 8px;
 }
 .navigation-focus-target > .provider-head,
 .navigation-focus-target > .auth-group-head {
-  outline: 2px solid var(--navigation-focus-color, #3b82f6);
+  outline: 2px solid var(--navigation-focus-color, var(--primary));
   outline-offset: 3px;
   border-radius: 5px;
 }
@@ -3231,8 +3244,14 @@ body.ui-scaled .popover {
    cards. Fixed series colors stay legible in both themes; skins recolor the
    surrounding surface, not the data. */
 .stats-body { padding: 0; }
+/* Series colours. These are NOT all tied to the accent on purpose: six lines or
+   six donut slices in one hue cannot be told apart, and a categorical chart
+   needs hue separation to do its job. Only the first series — the one that is
+   almost always the biggest and the one whose colour the reader anchors on —
+   follows the accent, so the charts pick up a theme change without collapsing
+   into a single hue. */
 .stats-root {
-  --stats-c1: #2563eb;
+  --stats-c1: var(--primary);
   --stats-c2: #7c3aed;
   --stats-c3: #059669;
   --stats-c4: #d97706;
@@ -3240,7 +3259,7 @@ body.ui-scaled .popover {
   --stats-c6: #0891b2;
 }
 :root[data-theme="dark"] .stats-root {
-  --stats-c1: #60a5fa;
+  --stats-c1: var(--primary);
   --stats-c2: #a78bfa;
   --stats-c3: #34d399;
   --stats-c4: #fbbf24;
@@ -3334,11 +3353,15 @@ body.ui-scaled .popover {
   cursor: pointer;
   transition: transform 0.12s var(--ease), outline-color 0.12s;
 }
-.stats-heat-cell:hover { transform: scale(1.28); outline: 1px solid #93c5fd; outline-offset: 1px; }
-.stats-heat-cell.level-1 { background: color-mix(in oklab, #60a5fa 42%, var(--muted)); }
-.stats-heat-cell.level-2 { background: color-mix(in oklab, #3b82f6 62%, var(--muted)); }
-.stats-heat-cell.level-3 { background: color-mix(in oklab, #2563eb 82%, var(--muted)); }
-.stats-heat-cell.level-4 { background: #1d4ed8; }
+/* Heatmap scale derived from the accent instead of Tailwind's blue ramp. The
+   hardcoded #60a5fa→#1d4ed8 stayed blue when the accent changed, so the
+   calendar looked like it belonged to a different app. Four steps of the same
+   hue: increasingly opaque over the muted empty-cell colour. */
+.stats-heat-cell:hover { transform: scale(1.28); outline: 1px solid color-mix(in oklab, var(--primary) 55%, transparent); outline-offset: 1px; }
+.stats-heat-cell.level-1 { background: color-mix(in oklab, var(--primary) 30%, var(--muted)); }
+.stats-heat-cell.level-2 { background: color-mix(in oklab, var(--primary) 55%, var(--muted)); }
+.stats-heat-cell.level-3 { background: color-mix(in oklab, var(--primary) 78%, var(--muted)); }
+.stats-heat-cell.level-4 { background: var(--primary); }
 .stats-heat-cell.outside { opacity: 0.18; cursor: default; pointer-events: none; }
 .stats-heat-cell.selected { outline: 2px solid var(--foreground); outline-offset: 1px; }
 .stats-heat-months {
@@ -3366,10 +3389,10 @@ body.ui-scaled .popover {
   border-radius: 2px;
   background: color-mix(in oklab, var(--muted) 72%, transparent);
 }
-.stats-heat-swatch.level-1 { background: color-mix(in oklab, #60a5fa 42%, var(--muted)); }
-.stats-heat-swatch.level-2 { background: color-mix(in oklab, #3b82f6 62%, var(--muted)); }
-.stats-heat-swatch.level-3 { background: color-mix(in oklab, #2563eb 82%, var(--muted)); }
-.stats-heat-swatch.level-4 { background: #1d4ed8; }
+.stats-heat-swatch.level-1 { background: color-mix(in oklab, var(--primary) 30%, var(--muted)); }
+.stats-heat-swatch.level-2 { background: color-mix(in oklab, var(--primary) 55%, var(--muted)); }
+.stats-heat-swatch.level-3 { background: color-mix(in oklab, var(--primary) 78%, var(--muted)); }
+.stats-heat-swatch.level-4 { background: var(--primary); }
 
 .stats-legend {
   display: flex;
@@ -10018,31 +10041,49 @@ body.panel-form #drawer {
   background: var(--background);
 }
 
-/* The usage page reserves a right gutter so the alphabet rail never sits on
-   the card or the scrollbar. */
+/* The alphabet rail is positioned OUTSIDE the reading column, in the empty
+   margin between the 940px column and the scrollbar. Every earlier attempt kept
+   it inside that column (a grid track), so it could only get room by taking it
+   from the cards — which is why it kept overlapping them however much padding
+   the page reserved. The rail is `position: absolute` against the page, offset
+   past `max-width: 940px`, so the cards keep their full width and the rail uses
+   space that was already empty. */
+/* The rail is `position: fixed` and placed by `placeIndexRail()`, so this page
+   reserves a gutter only when the window is too narrow to fit the rail beside
+   the centred 940px column. `--rail-gutter` is written by that function; on a
+   wide window it is 0 and the cards keep their full width. */
 #st-keyvault {
-  padding-right: 30px;
+  position: relative;
+  padding-right: var(--rail-gutter, 0px);
 }
 
-/* Alphabet rail in the empty gutter between the panel nav and the centered
-   settings column. It follows the Provider keys list and only exists on the
-   usage page (the whole #st-keyvault page, rail included, is hidden off that
-   tab). */
+/* Alphabet rail beside the provider-key list, only on the usage page. */
 .skey-directory {
   --index-width: 29px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--index-width);
-  gap: 12px;
-  align-items: start;
+  display: block;
 }
-.skey-directory > .set-section { grid-column: 1; grid-row: 1; min-width: 0; }
+.skey-directory > .set-section { min-width: 0; }
 .skey-az {
-  position: sticky;
-  top: 12px;
-  grid-column: 2;
-  grid-row: 1;
+  /* Outside the reading column, in the margin that `#st-keyvault`'s centred
+     940px box leaves empty. `position: fixed` puts it at the vertical centre of
+     the panel window rather than at the top of the list — a rail glued to the
+     first card reads as part of that card, not as navigation for the whole
+     list. `placeIndexRail()` in main.ts computes the left edge and the panel's
+     scroll offset; the shell is zoomed, so `top: 50%` alone drifts. */
+  position: fixed;
+  z-index: 3;
   display: grid;
+  /* Column-first flow: with two columns the default row flow put A and B side
+     by side, so scanning meant zig-zagging — A right to B, down to C, back
+     left to D. Column flow fills A down the first column and H down the
+     second, one direction per column.
+     `grid-auto-flow: column` alone does NOT wrap: with a fixed
+     `grid-template-columns` the browser builds one row and lays every item
+     sideways (measured: 12 letters on a single 32px row). The row count has
+     to be stated, so the letter total is divided across the columns. */
   grid-template-columns: repeat(var(--index-columns, 1), minmax(0, 1fr));
+  grid-auto-flow: column;
+  grid-template-rows: repeat(var(--index-rows, 40), auto);
   gap: 2px;
   padding: 4px;
   max-height: calc(100dvh - 100px);
@@ -10060,14 +10101,31 @@ body.panel-form #drawer {
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: var(--secondary-foreground);
+  /* One grey for the whole rail. The letters used to come in three brightnesses
+     (available, disabled, current) and read as three unrelated states; a single
+     muted grey keeps the rail as quiet navigation furniture, which is what an
+     alphabet index is. */
+  color: var(--muted-foreground);
   font: 600 11px/1 system-ui, sans-serif;
   cursor: pointer;
 }
 .skey-az button:hover:not(:disabled):not([aria-current="location"]) { background: var(--control-hover); color: var(--foreground); }
-.skey-az button[aria-current="location"] { background: var(--primary); color: var(--primary-foreground); }
+/* The current letter gets a tint and a step up in weight — no colour change,
+   so the rail stays one grey from top to bottom. */
+.skey-az button[aria-current="location"] {
+  background: color-mix(in srgb, var(--primary) 16%, transparent);
+  color: var(--foreground);
+  font-weight: 700;
+}
 .skey-az button:focus-visible { outline: 1px solid var(--primary); outline-offset: 1px; }
-.skey-az button:disabled { color: var(--muted-foreground); opacity: .45; cursor: default; }
+/* A letter with nothing under it stays the same grey, only fainter. Colour
+   alone made "available" look like a highlight rather than the baseline. */
+.skey-az button:disabled {
+  background: transparent;
+  color: color-mix(in srgb, var(--muted-foreground) 55%, transparent);
+  font-weight: 500;
+  cursor: default;
+}
 .skey-letter-group + .skey-letter-group { margin-top: 10px; }
 .skey-letter-heading {
   margin: 0;
@@ -10078,8 +10136,13 @@ body.panel-form #drawer {
   scroll-margin-top: 12px;
 }
 @media (max-height: 720px) {
-  .skey-directory { --index-width: 50px; --index-columns: 2; }
+  .skey-directory {
+    --index-width: 50px;
+    --index-columns: 2;
+  }
 }
+/* A narrow panel keeps the index tight. This sits after the width steps above
+   so a genuinely narrow window still wins. */
 @media (max-width: 650px) {
   .skey-directory { gap: 6px; }
 }
@@ -11745,11 +11808,18 @@ body.reduce-anim .spend-bolt.tier-3 svg {
 }
 /* Active/hover deliberately avoid the `#panel-nav` id: skin packs style
    `.panel-nav-item.active` with a class-only selector, and an id-prefixed
-   rule here would out-rank every skin. */
+   rule here would out-rank every skin.
+
+   The active state used to carry a 2px blue bar on its left edge. It read as a
+   stray bracket: the rail is a vertical list of rounded rows, so a hard bar at
+   the edge looks like a rendering artifact rather than a selection. The fill
+   alone carries it, with a slightly brighter text weight, which is how a native
+   macOS/Windows sidebar marks the row you are on. */
 .set-shell__nav .panel-nav-item.active {
-  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  background: color-mix(in srgb, var(--primary) 13%, transparent);
   color: var(--foreground);
-  box-shadow: inset 2px 0 var(--primary);
+  font-weight: 600;
+  box-shadow: none;
 }.set-shell__nav .panel-nav-item:hover {
   background: color-mix(in srgb, var(--accent) 70%, transparent);
   color: var(--foreground);
