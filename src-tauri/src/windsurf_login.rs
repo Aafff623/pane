@@ -125,6 +125,11 @@ pub fn start() -> Result<LoginStart, String> {
         }
         match listener.accept() {
             Ok((mut stream, _)) => {
+                // On Windows an accepted socket inherits the listener's
+                // non-blocking flag, which would make the read below return
+                // 0 before the browser has sent anything.
+                let _ = stream.set_nonblocking(false);
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(5)));
                 let mut buf = [0u8; 8192];
                 let read = stream.read(&mut buf).unwrap_or(0);
                 let req = String::from_utf8_lossy(&buf[..read]);
