@@ -3,7 +3,10 @@
 }
 
 .layout {
-  width: min(100%, 1320px);
+  /* 1200px, matching the `.container` the rest of the page uses. The hero had
+     its own 1320px ceiling, so on a wide screen the first fold was 120px wider
+     than every section under it and the left edges did not line up. */
+  width: min(100%, 1200px);
   margin-inline: auto;
   display: grid;
   grid-template-columns: minmax(340px, .84fr) minmax(0, 1.16fr);
@@ -25,11 +28,17 @@
 
 .proof {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* Two columns on a phone, four when there is room. A fixed four-track grid
+     gave each fact ~75px at 360px wide, so an 11px label wrapped onto three
+     lines and the row read as a wall of text. */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
   margin: 33px 0 0;
   padding-top: 16px;
   border-top: 1px solid var(--border);
+}
+@media (width >= 560px) {
+  .proof { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 .fact { display: flex; min-width: 0; flex-direction: column-reverse; justify-content: flex-end; gap: 4px; }
 .fact dd { margin: 0; font-size: clamp(17px, 1.8vw, 24px); font-weight: 650; line-height: 1.12; }

@@ -2,7 +2,7 @@
   "version": "0.12.4",
   "files": {
     "index.html": "b44b9f5d812fbbd4b02653e6959d64e330fc534820021c685622f3219cdea671",
-    "src/main.ts": "a2a5338ae3afcbd9142d1a648395aa85b3980b4b816222f5356699c041e1b760",
+    "src/main.ts": "770bf457b50b1a012fc72e40b5eface4921c405b030f8b0834fe2c7681679855",
     "src/styles.css": "9be6a95f7826756f393c95fc78ecdff6cd4cc5a1ffba7df165a62494a16166bb",
     "src/i18n.ts": "79243c1471df18c0884a229a007c6b896324326b0f0a0814725be0f3110460b0",
     "src/providerCatalog.ts": "92663a0d02fdd3c857911ccf030534bf9ee558ab1af46ef8f3a4fa6e728c0f93",

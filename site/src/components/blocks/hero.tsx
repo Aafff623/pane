@@ -12,7 +12,11 @@ import styles from "./hero.module.css";
 export function Hero({ lang = "en" }: { lang?: Lang }) {
   const copy = messages[lang].hero;
   const demoHref = lang === "zh" ? "/zh/demo/" : "/demo/";
-  const proof = [String(SITE_FACTS.providers), "0", "MIT", `v${SITE_FACTS.version}`];
+  // "0" as a proof point read like "zero accounts" on a landing page. These
+  // four are the facts a visitor actually cares about, and "No sign-up" is the
+  // honest version of why Pane needs no account: everything it reads is already
+  // on the machine.
+  const proof = [String(SITE_FACTS.providers), copy.noSignup, "MIT", `v${SITE_FACTS.version}`];
 
   return (
     <section className={styles.hero} aria-labelledby="hero-title">
