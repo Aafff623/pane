@@ -133,6 +133,13 @@ fn serve_callback(listener: TcpListener, login_id: String, pending: &Mutex<Optio
             Ok((mut stream, _)) => {
                 // Browsers may preconnect without sending a request. Bound both
                 // reads and writes so an idle connection cannot consume the login.
+                //
+                // The listener is non-blocking so the accept loop can poll its
+                // deadline, and on Windows an accepted socket INHERITS that
+                // flag — so without this the read below returns WouldBlock
+                // before the browser has written anything and the request is
+                // dropped unanswered. The timeouts are what bound the read.
+                let _ = stream.set_nonblocking(false);
                 let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
                 let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
                 let mut line = String::new();

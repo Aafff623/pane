@@ -1074,6 +1074,11 @@ mod wall_tests {
                         Err(error) => panic!("accept: {error}"),
                     }
                 };
+                // The listener is non-blocking so the accept loop can poll, and
+                // on Windows the accepted socket inherits that flag — the read
+                // below would then return WouldBlock before the client has
+                // written its request.
+                stream.set_nonblocking(false).unwrap();
                 stream.set_read_timeout(Some(std::time::Duration::from_secs(3))).unwrap();
                 let mut request = [0; 4096];
                 let n = stream.read(&mut request).unwrap();
