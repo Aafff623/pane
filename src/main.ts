@@ -23228,6 +23228,7 @@ function authFlowHtml(family: string): string {
 
 let authDialogFamily: string | null = null;
 let authDialogSignature = "";
+let authDialogShell: DialogShell | null = null;
 
 function canSignInFromDialog(family: string): boolean {
   return OAUTH_PROVIDERS.has(family) || BROWSER_LOGIN_PROVIDERS.has(family);
@@ -23254,7 +23255,8 @@ function closeAuthLoginDialog(cancel: boolean): void {
   const family = authDialogFamily;
   authDialogFamily = null;
   authDialogSignature = "";
-  document.getElementById("auth-login-overlay")?.remove();
+  authDialogShell?.close();
+  authDialogShell = null;
   if (cancel && family) {
     stopAuthFlow(family);
     authFlows.delete(family);
@@ -23276,7 +23278,8 @@ function copyAuthDialogText(text: string, button: HTMLElement | null): void {
 function renderAuthLoginDialog(): void {
   const family = authDialogFamily;
   if (!family) {
-    document.getElementById("auth-login-overlay")?.remove();
+    authDialogShell?.close();
+    authDialogShell = null;
     authDialogSignature = "";
     return;
   }
@@ -23288,7 +23291,7 @@ function renderAuthLoginDialog(): void {
     return;
   }
   const signature = [family, flow.phase, flow.url ?? "", flow.userCode, flow.error ?? "", flow.label ?? ""].join("|");
-  const existing = document.getElementById("auth-login-overlay");
+  const existing = authDialogShell?.host ?? null;
   if (existing && signature === authDialogSignature) return;
   authDialogSignature = signature;
 
@@ -23330,8 +23333,17 @@ function renderAuthLoginDialog(): void {
 
   let box = existing;
   if (!box) {
-    box = document.createElement("div");
-    box.id = "auth-login-overlay";
+    // Every re-render rewrites the body in place (`authDialogSignature` keeps
+    // unchanged phases out), so the host is mounted once per flow.
+    const shell = mountDialogShell({
+      overlayId: "auth-login-overlay",
+      onClose: () => {
+        if (authDialogShell === shell) authDialogShell = null;
+        closeAuthLoginDialog(true);
+      },
+    });
+    authDialogShell = shell;
+    box = shell.host;
     box.innerHTML = `<div id="auth-login-box" role="dialog" aria-modal="true" aria-labelledby="auth-login-title">
       <h3 id="auth-login-title"></h3>
       <p class="auth-login-hint" id="auth-login-hint"></p>
@@ -23341,10 +23353,6 @@ function renderAuthLoginDialog(): void {
     </div>`;
     box.addEventListener("click", (event) => {
       const target = event.target as HTMLElement;
-      if (target === box) {
-        closeAuthLoginDialog(true);
-        return;
-      }
       const current = authDialogFamily;
       if (!current) return;
       if (target.closest("[data-auth-login-cancel]")) {
@@ -23389,13 +23397,6 @@ function renderAuthLoginDialog(): void {
           });
       }
     });
-    box.addEventListener("keydown", (event) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopPropagation();
-      closeAuthLoginDialog(true);
-    });
-    document.body.append(box);
   }
   box.querySelector("#auth-login-title")!.textContent = t("auth.loginTitle", { name });
   box.querySelector("#auth-login-hint")!.textContent = hint;
