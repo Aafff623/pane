@@ -1,11 +1,11 @@
 // The one dialog shell every Pane overlay should have used from the start.
 //
-// Fourteen overlays each re-implemented the same five things (build the host,
+// Twenty overlays each re-implemented the same five things (build the host,
 // append it, watch Esc, restore focus on close, remove the node) and got
-// different subsets right. Two of them trap Tab, two return focus, none of them
-// lock background scrolling. This module is that shared behaviour in one place,
-// written with no framework so the overlays that are still plain DOM can adopt
-// it without a rewrite.
+// different subsets right. Two of them trapped Tab, two returned focus, none of
+// them locked background scrolling. This module is that shared behaviour in one
+// place, written with no framework so the overlays that are still plain DOM can
+// adopt it without a rewrite.
 //
 // It deliberately does NOT render anything. Callers keep their own markup and
 // class names, because the three shipping skins paint by matching those names.
