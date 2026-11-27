@@ -79,6 +79,10 @@ export function mountDialogShell(
   const arrowKeys = options.arrowKeys === true;
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "Escape") {
+      // An IME candidate window closes with Escape too. Treating that as
+      // "dismiss the dialog" swallowed the keystroke mid-composition, which is
+      // how the import dialog used to behave before it shared this shell.
+      if (e.isComposing) return;
       e.preventDefault();
       e.stopPropagation();
       close();

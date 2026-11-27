@@ -10368,8 +10368,8 @@ async function applyImportSelection(): Promise<void> {
 
 function openImportDialog(): void {
   if (document.querySelector("#import-overlay")) return;
-  const overlay = document.createElement("div");
-  overlay.id = "import-overlay";
+  const shell = mountDialogShell({ overlayId: "import-overlay" });
+  const overlay = shell.host;
   overlay.innerHTML = `<div class="picker-box import-box" role="dialog" aria-modal="true" aria-labelledby="import-dialog-title">
     <h3 id="import-dialog-title">${escapeHtml(t("import.title"))}</h3>
     <p>${escapeHtml(t("import.lead"))}</p>
@@ -10383,16 +10383,9 @@ function openImportDialog(): void {
     if (target.checked) importSelection.add(target.dataset.importPick!);
     else importSelection.delete(target.dataset.importPick!);
   });
-  const close = () => {
-    document.removeEventListener("keydown", onKey, true);
-    overlay.remove();
-  };
-  const onKey = (event: KeyboardEvent) => {
-    if (event.key !== "Escape" || event.isComposing) return;
-    event.preventDefault();
-    event.stopPropagation();
-    close();
-  };
+  // IME composition must not be mistaken for Escape-to-close, which the shell's
+  // generic handler would do — so composition is checked before delegating.
+  const close = () => shell.close();
   overlay.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
     if (target === overlay || target.closest("#import-cancel")) {
@@ -10407,9 +10400,7 @@ function openImportDialog(): void {
       void applyImportSelection().then(() => close());
     }
   });
-  document.addEventListener("keydown", onKey, true);
-  document.body.appendChild(overlay);
-  overlay.querySelector<HTMLButtonElement>("#import-ok")?.focus();
+  shell.focusFirst(overlay.querySelector<HTMLButtonElement>("#import-ok"));
   // Always rescan when the dialog opens: the source file may have changed
   // since onboarding, and a fresh scan is what fills the import cache.
   void loadImportScan(true);
