@@ -19378,9 +19378,12 @@ function placeIndexRail(): void {
   const scroller = document.querySelector<HTMLElement>("#panel-scroll");
   const column = document.querySelector<HTMLElement>("#st-keyvault");
   if (!rail || !scroller || !column) return;
-  const scale = currentUiScale() || 1;
-  const columnRect = column.getBoundingClientRect();
-  const scrollerRect = scroller.getBoundingClientRect();
+  // Everything below must be one unit. `offsetWidth` is layout px; the
+  // `getBoundingClientRect()` values are visual (zoomed) px. Mixing them pushed
+  // the rail away from the column at any scale ≠ 1, which is the same trap
+  // `scaledUiRect` exists for.
+  const columnRect = scaledUiRect(column.getBoundingClientRect());
+  const scrollerRect = scaledUiRect(scroller.getBoundingClientRect());
   const railWidth = rail.offsetWidth || 29;
   const railHeight = rail.offsetHeight || 0;
 
@@ -19393,7 +19396,9 @@ function placeIndexRail(): void {
   const rightEdge = scrollerRect.right - railWidth - 12;
   const outside = beside + railWidth <= scrollerRect.right - 8;
   const left = outside ? beside : rightEdge;
-  rail.style.left = `${Math.round(left / scale)}px`;
+  // `scaledUiRect` already converted to layout px, matching `offsetWidth` and
+  // the `left`/`top` it is assigned to — dividing again would shift it twice.
+  rail.style.left = `${Math.round(left)}px`;
   // Writing this back changes the column width, which `ResizeObserver` reports
   // as a new size — guard against the feedback loop by only touching the
   // property when the value actually changes.
@@ -19408,7 +19413,7 @@ function placeIndexRail(): void {
   const min = scrollerRect.top + 12;
   const max = scrollerRect.bottom - railHeight - 12;
   const top = Math.min(Math.max(centre, min), Math.max(min, max));
-  rail.style.top = `${Math.round(top / scale)}px`;
+  rail.style.top = `${Math.round(top)}px`;
 }
 
 function syncSkeyAz(): void {

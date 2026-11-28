@@ -1639,3 +1639,14 @@ The Settings → Usage charts were rebuilt to match the card trend. Two traps:
   `configNoticeVersion`. Both only did that from button handlers, so Escape
   left the notice to re-open on the next launch. Escape must record the same
   "seen" state as the ✕.
+
+## One unit per coordinate system (2026-11-28)
+
+- **`getBoundingClientRect()` is visual px; `offsetWidth` and `style.left/top`
+  are layout px.** Under `body.ui-scaled { zoom: var(--ui-scale) }` the two
+  differ by the scale factor. `placeIndexRail()` mixed them and pushed the A–Z
+  rail ~205px off its column at 125%; it passed type checking, every unit test
+  and a read of the code, because each half was individually right.
+  `scaledUiRect()` exists for exactly this — use it, and never divide by
+  `currentUiScale()` a second time afterwards. `tests/index-rail-scale.test.mjs`
+  fails if the raw rect comes back.
