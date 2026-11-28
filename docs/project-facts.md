@@ -1616,3 +1616,26 @@ The Settings → Usage charts were rebuilt to match the card trend. Two traps:
   `showChangelogDialog`'s `onClose` is `noticeClosed`; discarding it on Escape
   left `noticeOpen` true for the rest of the session, blocking every later
   boot notice and the first-run tour.
+
+## Escape and the scroll lock are shared resources (2026-11-27)
+
+- **Only the topmost shell reacts to Escape.** Every shell listens on
+  `document` in the capture phase. `stopPropagation()` does not stop another
+  listener on the same node, so two stacked dialogs each consumed the same
+  Escape and one press closed both. `dialogShell.ts` keeps a mount-order stack
+  (`Symbol` frames) and the handler returns early unless its frame is on top.
+  A programmatic `close()` of a lower dialog still works; it just removes its
+  own frame.
+- **`lockBackgroundScroll` is reference-counted.** Save/restore breaks as soon
+  as two dialogs are open: the inner unlock writes `"hidden"` back as "the
+  previous value", and the page stays unscrollable after both close.
+- **`aria-modal="true"` is a promise about focus.** Three dialogs mounted
+  without `focusFirst`, so focus stayed on the board behind them and the Tab
+  trap (which only intercepts at the dialog's edges) never engaged. The RTK
+  panel claims modality but is injected into the board markup, so it now omits
+  `aria-modal` instead.
+- **Every dialog that gates a one-time action needs `onClose`.** The font
+  guide writes `uiFontPromptVersion`; the config notice writes
+  `configNoticeVersion`. Both only did that from button handlers, so Escape
+  left the notice to re-open on the next launch. Escape must record the same
+  "seen" state as the ✕.
