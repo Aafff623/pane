@@ -86,6 +86,34 @@ test("share metadata: every page states its own locale", () => {
   }
 });
 
+test("design: sections share one opening and the accent stays scarce", () => {
+  // site/DESIGN.md: every content section opens with eyebrow -> title ->
+  // one-line description, and `--primary` is reserved for actions and key
+  // numbers. Both are easy to drift per-file, so pin them here.
+  // `closing-cta` has no section id of its own, only the heading's.
+  const OWNS_OPENING = ["panel-anatomy", "features", "trust", "faq", "download", "closing-cta-heading"];
+
+  for (const page of ["index.html", "zh/index.html"]) {
+    const html = readFileSync(p(page), "utf8");
+
+    for (const id of OWNS_OPENING) {
+      const at = html.indexOf(`id="${id}"`);
+      assert.ok(at >= 0, `${page} has #${id}`);
+      // The closing CTA's eyebrow sits just BEFORE its heading id, so widen the
+      // window backwards for it.
+      const from = Math.max(0, at - 260);
+      const head = html.slice(from, at + 900);
+      assert.match(head, /tracking-wider/, `#${id} must open with an eyebrow`);
+      assert.match(head, /<h2/, `#${id} must open with an h2`);
+      assert.match(head, /leading-relaxed/, `#${id} must carry its one-line description`);
+    }
+
+    // The eyebrow is a label, not an action: it must not wear the accent.
+    const eyebrowPrimary = /tracking-wider[^"]*text-primary|text-primary[^"]*tracking-wider/;
+    assert.doesNotMatch(html, eyebrowPrimary, `${page}: eyebrows must not use the accent`);
+  }
+});
+
 test("worker: framing policy and legacy /en redirects", async () => {
   const home = await call("/");
   assert.equal(home.status, 200);

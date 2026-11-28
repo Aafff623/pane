@@ -49,6 +49,7 @@ export const messages = {
     panel: {
       eyebrow: "The panel",
       title: "Every quota window, in one floating panel",
+      description: "Seven areas, one window: quotas, balances, reset times and spend. Click a row to see where it lives.",
       items: [
         { title: "Overview", lines: ["Quota rings and remaining percentages for every provider.", "Problems are marked on the card."] },
         { title: "Header", lines: ["Refresh, settings and theme in one row.", "The snapshot time stays visible."] },
@@ -194,6 +195,7 @@ export const messages = {
     panel: {
       eyebrow: "面板",
       title: "一块悬浮窗，装下所有周期",
+      description: "七块区域，一个窗口：额度、余额、重置时间与花费。点一行看它在哪里。",
       items: [
         { title: "总览", lines: ["额度环与剩余比例按服务商平铺，异常状态直接标在卡片上。", "会话、周度与月度额度一眼可见。"] },
         { title: "顶栏", lines: ["刷新、设置与主题集中在同一行。", "上次快照时间常驻显示。"] },

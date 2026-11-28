@@ -30,10 +30,11 @@ export function PanelAnatomy({ lang = "en" }: { lang?: Lang }) {
             (eyebrow, title, description). Without the eyebrow this block
             started at the headline and the page rhythm broke every other
             section. */}
-        <p className="text-primary text-center text-sm font-medium tracking-wider">{copy.eyebrow}</p>
+        <p className="text-muted-foreground text-center text-sm font-medium tracking-wider">{copy.eyebrow}</p>
         <h2 id="panel-anatomy-title" className="mt-4 text-center text-3xl tracking-tight text-balance md:text-4xl lg:text-5xl">
           {copy.title}
         </h2>
+        <p className="text-muted-foreground mx-auto mt-4 max-w-[640px] text-center text-base leading-relaxed">{copy.description}</p>
 
         <div className={styles.walkthrough}>
           <div className={styles.list}>

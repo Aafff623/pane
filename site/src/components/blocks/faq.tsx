@@ -11,9 +11,9 @@ export function FAQ({ lang = "en" }: { lang?: Lang }) {
         <div className="space-y-4">
           {/* The eyebrow is what makes this section read as a peer of the two
               above it instead of jumping straight to a headline. */}
-          <p className="text-primary text-sm font-medium tracking-wider">{copy.eyebrow}</p>
-          <h2 className="text-3xl tracking-tight md:text-4xl lg:text-5xl">{copy.title}</h2>
-          <p className="text-muted-foreground max-w-sm leading-relaxed">{copy.description}</p>
+          <p className="text-muted-foreground text-sm font-medium tracking-wider">{copy.eyebrow}</p>
+          <h2 className="mt-4 text-3xl tracking-tight text-balance md:text-4xl lg:text-5xl">{copy.title}</h2>
+          <p className="text-muted-foreground mt-4 max-w-[640px] text-base leading-relaxed">{copy.description}</p>
         </div>
 
         <Accordion type="single" collapsible className="mx-auto w-full max-w-4xl">

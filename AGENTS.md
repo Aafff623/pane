@@ -111,6 +111,20 @@ Local `release` profiles are never needed: releases are built by CI.
 Domain vocabulary (the glossary) → [`CONTEXT.md`](CONTEXT.md); verified engineering
 facts, constraints and failure modes → [`docs/project-facts.md`](docs/project-facts.md).
 
+## UI conventions (two surfaces, two rule sets)
+
+The desktop panel and the marketing site serve different purposes and are
+governed separately. Do not carry one's spacing/type scale onto the other.
+
+- **Desktop panel + settings** → [`docs/desktop-ui-conventions.md`](docs/desktop-ui-conventions.md).
+  980×700, 11–12.5px body text, theme/skin variables, skin selectors that
+  match class names.
+- **Marketing site** → [`site/DESIGN.md`](site/DESIGN.md).
+  Inter, 14px minimum body, `--foreground`/`--primary` tokens, 90/10 accent.
+
+Both end with the same rule: **judge by the rendered screen, not by computed
+properties or a passing type check.**
+
 ## Authoritative vs local-only files
 
 - **Canonical startup guide**: `docs/dev-startup.md`. This file only summarizes it.

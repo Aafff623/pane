@@ -11,7 +11,7 @@ export function ClosingCta({ lang = "en" }: { lang?: Lang }) {
   return (
     <section aria-labelledby="closing-cta-heading" className="py-13 md:py-18">
       <div className="container text-center">
-        <p className="text-primary text-sm font-medium tracking-wider">{copy.eyebrow}</p>
+        <p className="text-muted-foreground text-sm font-medium tracking-wider">{copy.eyebrow}</p>
         <h2
           id="closing-cta-heading"
           className="mx-auto mt-4 max-w-4xl whitespace-pre-line text-3xl leading-[1.1] tracking-tight text-balance md:text-4xl lg:text-5xl"

@@ -11,11 +11,11 @@ export function DownloadSection({ lang = "en" }: { lang?: Lang }) {
     <section id="download" aria-labelledby="download-heading" className="py-14 md:py-20">
       <div className="container">
         <div className="mx-auto max-w-[760px] text-center">
-          <p className="text-primary text-sm font-medium tracking-wider">{copy.eyebrow}</p>
+          <p className="text-muted-foreground text-sm font-medium tracking-wider">{copy.eyebrow}</p>
           <h2 id="download-heading" className="mt-4 text-3xl tracking-tight text-balance md:text-4xl lg:text-5xl">
             {copy.title}
           </h2>
-          <p className="text-muted-foreground mx-auto mt-4 max-w-[620px] leading-relaxed">{copy.description}</p>
+          <p className="text-muted-foreground mx-auto mt-4 max-w-[620px] text-base leading-relaxed">{copy.description}</p>
         </div>
 
         <div className="mt-12 flex flex-col items-center justify-center gap-3 sm:flex-row">

@@ -79,7 +79,7 @@ export function AgentWorkflow({ lang = "en" }: { lang?: Lang }) {
     <section id="features" aria-labelledby="agent-workflow-heading" className="py-14 md:py-20">
       <div className="container flex flex-col items-center justify-start">
         <div className="mx-0 w-full max-w-[980px] text-center">
-          <p className="text-primary text-sm font-medium tracking-wider">{copy.eyebrow}</p>
+          <p className="text-muted-foreground text-sm font-medium tracking-wider">{copy.eyebrow}</p>
           <h2 id="agent-workflow-heading" className="mt-4 w-full text-3xl tracking-tight text-balance md:text-4xl lg:text-5xl">
             {copy.title}
           </h2>

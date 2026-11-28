@@ -8,7 +8,7 @@ export function DemoEmbed({ lang }: { lang: Lang }) {
   return (
     <div className="border-border bg-card overflow-hidden rounded-2xl border shadow-lg">
       <div className="border-border flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
-        <span className="text-primary inline-flex items-center gap-2 text-xs font-medium tracking-widest uppercase">
+        <span className="text-muted-foreground inline-flex items-center gap-2 text-xs font-medium tracking-widest uppercase">
           <i className="bg-primary inline-block size-1.5 rounded-full" aria-hidden="true" />
           {copy.note}
         </span>
@@ -22,12 +22,14 @@ export function DemoEmbed({ lang }: { lang: Lang }) {
         </a>
       </div>
       <div className="bg-muted/40 flex justify-center px-4 py-8 sm:py-12">
-        <div className="border-border bg-background w-full max-w-[460px] overflow-hidden rounded-xl border shadow-xl">
-          {/* A fixed height only shows the top of the panel; the frame scrolls
-              internally, so give phones nearly the whole viewport and cap it on
-              desktop where the panel's own scroll area takes over. */}
-          <PaneDemoFrame lang={lang} title={copy.frameTitle} className="h-[min(660px,calc(100dvh-13rem))] min-h-[420px] w-full" />
-        </div>
+        {/* A fixed height only shows the top of the panel; the frame scrolls
+            internally, so give phones nearly the whole viewport and cap it on
+            desktop where the panel's own scroll area takes over. */}
+        <PaneDemoFrame
+          lang={lang}
+          title={copy.frameTitle}
+          className="border-border h-[min(660px,calc(100dvh-13rem))] min-h-[420px] w-full max-w-[460px] overflow-hidden rounded-xl border shadow-xl"
+        />
       </div>
     </div>
   );
