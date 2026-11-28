@@ -1650,3 +1650,29 @@ The Settings → Usage charts were rebuilt to match the card trend. Two traps:
   `scaledUiRect()` exists for exactly this — use it, and never divide by
   `currentUiScale()` a second time afterwards. `tests/index-rail-scale.test.mjs`
   fails if the raw rect comes back.
+
+## Gitee mirror: what actually fails (2026-11-28)
+
+- **The token is the usual suspect, and it expires silently.** The
+  `gitee-mirror` job needs `GITEE_TOKEN` (`projects` scope). The previous one
+  lapsed around 2026-11-19, and 0.12.3 / 0.12.4 / 0.13.0 all shipped without a
+  CN mirror before anyone noticed — the job fails loudly by design, but a red
+  job after a green release is easy to scroll past. Current token expires
+  2027-02-26; **check this before the next release**.
+- **`GITEE_BRANCH: master` is correct.** The Gitee mirror repo
+  (`fan-tengda/pane`) has `master` as its only branch, even though GitHub uses
+  `main`.
+- **Attaching a file needs the release *id*, not the tag name.** Measured:
+  `POST /repos/{o}/{r}/releases/{id}/attach_files` → 201;
+  `.../releases/{tag}/attach_files` → 404 with an HTML error page. Use the id
+  from `GET /releases/tags/{tag}`.
+- **A missing release returns `null`, not 404.** `GET
+  /releases/tags/{tag}` answers `200` with a `null` body when the release does
+  not exist, so a status-code check silently passes. Parse the body.
+- **The mirror only ever needs the latest version.** `site/worker.js`
+  `GITEE_ASSET(version)` builds the URL from the *latest* release's version, so
+  a backfill of older tags has no automatic consumer; it only serves people
+  who kept an old build and upgrade by hand.
+- **Verify a mirror by downloading it.** Sizes and hashes are not in the
+  release JSON in a stable shape; fetching the file and comparing SHA256
+  against GitHub is the only check that proves the mirror works.
