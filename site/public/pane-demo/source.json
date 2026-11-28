@@ -1,10 +1,10 @@
 {
-  "version": "0.12.4",
+  "version": "0.12.5",
   "files": {
     "index.html": "b44b9f5d812fbbd4b02653e6959d64e330fc534820021c685622f3219cdea671",
-    "src/main.ts": "6eb13c90a3007a2efeebdc1c1d95f33f2fdf57bbba8e2a118dbe61c72cd6ba57",
-    "src/styles.css": "e51f2f5340d0832a071c49fb2302bcd837a6203e97cf71dff78e2a7051c49c87",
-    "src/i18n.ts": "79243c1471df18c0884a229a007c6b896324326b0f0a0814725be0f3110460b0",
+    "src/main.ts": "a4f1dca2b7f9d8d71ed515d4bf7e62d86369f8ecc61c94bc5c8d5b0f5ced3778",
+    "src/styles.css": "3b885ca9cdc2b113afec42dfdf7ab12270a00df4acfafb9d833f13b00ec1fc93",
+    "src/i18n.ts": "6e07ce4f46ecd8c44322fe38d210e9ea06446bbafd48eb22b8e0c794deb68881",
     "src/providerCatalog.ts": "92663a0d02fdd3c857911ccf030534bf9ee558ab1af46ef8f3a4fa6e728c0f93",
     "src/ui/coss.css": "5ec4317f06dd22ae9df5ca951c5edb895ef703d36d931995a1574f00110e20ba",
     "src/ui/coss.tsx": "5769530e580d594388f8e8415684316d7dd6868f19b81a8ef8e6e95518b221b1",
