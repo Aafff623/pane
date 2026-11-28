@@ -10055,9 +10055,9 @@ body.panel-form #drawer {
    margin between the 940px column and the scrollbar. Every earlier attempt kept
    it inside that column (a grid track), so it could only get room by taking it
    from the cards — which is why it kept overlapping them however much padding
-   the page reserved. The rail is `position: absolute` against the page, offset
-   past `max-width: 940px`, so the cards keep their full width and the rail uses
-   space that was already empty. */
+   the page reserved. The rail is `position: fixed` (below, so it never scrolls
+   away with the list) and placed past `max-width: 940px`, so the cards keep
+   their full width and the rail uses space that was already empty. */
 /* The rail is `position: fixed` and placed by `placeIndexRail()`, so this page
    reserves a gutter only when the window is too narrow to fit the rail beside
    the centred 940px column. `--rail-gutter` is written by that function; on a

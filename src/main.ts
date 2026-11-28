@@ -10432,8 +10432,6 @@ function openImportDialog(): void {
     if (target.checked) importSelection.add(target.dataset.importPick!);
     else importSelection.delete(target.dataset.importPick!);
   });
-  // IME composition must not be mistaken for Escape-to-close, which the shell's
-  // generic handler would do — so composition is checked before delegating.
   const close = () => shell.close();
   overlay.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;

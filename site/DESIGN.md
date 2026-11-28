@@ -13,6 +13,8 @@
 ### 90 / 10
 大约 90% 的面积是中性色（`--background`、`--card`、`--foreground`、`--muted-foreground`、`--border`），10% 是单一强调色 `--primary`。
 
+实测比这个更克制：每个区块大约 1 处 `--primary` 对 9–14 处中性色。可以更严，不要更松。
+
 强调色只用于：**一个主行动按钮**、**一个关键数字**、**当前导航项**。不要用它做装饰性线条、背景块或图标着色。
 
 ### 只用 token，不写字面色值
@@ -44,17 +46,17 @@
 **换之前先确认值得。** Inter 和 Geist 在这个体量上视觉差异很小，但换字体要重新检查每一处的换行和行高。
 
 ### 字号阶梯
-现有页面实际用的：
+现有页面实际用的（实测分布，不是理想阶梯）：
 
-| 用途 | Class | 实际 |
-|---|---|---|
-| 正文 | `text-base` | 16px |
-| 次要正文 / 导航 | `text-sm` | 14px |
-| 极小标签（eyebrow、徽标） | `text-xs` | 12px |
-| 区块标题 | `text-3xl md:text-4xl lg:text-5xl` | 30 / 36 / 48px |
-| 首屏标题 | 同上，走 `HeroHeadline` 分段动画 | — |
+| 用途 | Class | 实际 | 用在哪 |
+|---|---|---|---|
+| 首屏/区块标题 | `text-3xl md:text-4xl lg:text-5xl` | 30 / 36 / 48px | 每个区块的 `h2` |
+| 卡片标题 | `text-base` | 16px | 下载区事实卡的 `dt`、导航 |
+| 正文 | `text-base` / `text-sm` | 16 / **14px** | 区块描述用 16，卡片内文用 14 |
+| 次级动作、徽标 | `text-sm` | 14px | eyebrow、"新窗口打开" |
+| 页脚、极小标签 | `text-xs` | 12px | 版权行、快捷键的 `+` |
 
-**正文最小 14px，不用 12px 做正文。** 落地页的读者在手机上阅读，不是在看数据密集型面板。
+**正文不用 12px，但 12px 守卫的是"标签"而不是"段落"。** 页脚和版权行用 12px 是有意的：它们在视觉上是收尾，不是要读的内容。落地页的读者在手机上阅读，长段落别降到 14px 以下。
 
 ### 间距
 Tailwind 默认栅格是 4px，`p-4` = 16px。现有页面遵循这个栅格，保持一致即可，不需要额外发明。
@@ -62,14 +64,17 @@ Tailwind 默认栅格是 4px，`p-4` = 16px。现有页面遵循这个栅格，�
 留白要比面板大方。区块间距 `py-14 md:py-20`（56 / 80px）是现有节奏，不要压缩。
 
 ### 圆角
-按尺寸分档，不要混用：
+按尺寸分档，不要混用。这些是 `--radius: 8px` 派生出来的实际值，不是 Tailwind 默认值：
 
-| 元素 | 圆角 |
-|---|---|
-| 小按钮、徽标 | `rounded-md` / `rounded-lg`（6 / 8px） |
-| 卡片 | `rounded-xl`（12px） |
-| 大容器、demo 外框 | `rounded-2xl`（16px） |
-| 头像、圆点 | `rounded-full` |
+| Class | 实际 | 用于 |
+|---|---|---|
+| `rounded-xs` / `rounded-sm` | 4px | 极小的标签 |
+| `rounded-md` | 6px | 小按钮、徽标、logo |
+| `rounded-lg` | 8px | 导航项、次级按钮 |
+| `rounded-xl` | 12px | 卡片 |
+| `rounded-2xl` | 16px | 大容器、demo 外框 |
+| `rounded-3xl` | 24px | 大号展示块 |
+| `rounded-full` | 999px | 头像、圆点、胶囊 |
 
 ## 四、布局与内容
 
@@ -89,12 +94,14 @@ Tailwind 默认栅格是 4px，`p-4` = 16px。现有页面遵循这个栅格，�
 ### 文案必须可核实
 页面上的每个数字和事实都要能对到代码或仓库：
 
-- `src/content/facts.ts` 的 `version`、`providers` 由测试绑定到 `package.json` 和 `src/providerCatalog.ts`
+- `src/content/facts.ts` 的 `version`、`providers` 由测试绑定到仓库根的 `package.json` 和 `src/providerCatalog.ts`（站点目录外）
 - "WinGet 审核中"是 PR 状态，不是"已上架"
 - macOS 标 Beta，因为构建矩阵里有但它不是主要验证平台
 - 不要写"绝对安全""零风险"——隐私页列了每一次出网请求，用可核实的话替代绝对化表述
 
 ## 五、中英双语
+
+站点只有两种语言：`en`（`/`）和 `zh`（`/zh/`）。桌面应用是三语言（`en` / `zh` / `ru`）——这里不跟它对齐。
 
 两套消息树（`src/components/i18n.ts`）的 key 必须一一对应，且**含义对等**。不是逐字翻译。
 
