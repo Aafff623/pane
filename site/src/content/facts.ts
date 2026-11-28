@@ -1,5 +1,5 @@
 export const SITE_FACTS = {
-  version: "0.12.4",
+  version: "0.13.0",
   providers: 80,
   repo: "https://github.com/Aafff623/pane",
   releases: "https://github.com/Aafff623/pane/releases/latest",

@@ -22,7 +22,7 @@
     "typescript",
     "vite"
   ],
-  "version": "0.12.4",
+  "version": "0.13.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
