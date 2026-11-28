@@ -508,12 +508,16 @@ mod tests {
 
     #[test]
     fn lazy_import_bridges_the_single_oauth_slot() {
+        // Uses its own family id: the harness secretstore is one process-global
+        // map keyed by `oauth/<family>`, so sharing "copilot" with the
+        // multi-source test makes the two race under parallel test threads.
+        let family = "copilot-slot";
         let base = std::env::temp_dir().join(format!("pane-login-import-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         let oauth_dir = base.join("oauth");
         std::fs::create_dir_all(&oauth_dir).unwrap();
         std::fs::write(
-            oauth_dir.join("copilot.json"),
+            oauth_dir.join(format!("{family}.json")),
             serde_json::to_string_pretty(&crate::oauth::StoredTokens {
                 access_token: "gho_old".into(),
                 refresh_token: "gho_old".into(),
@@ -527,15 +531,15 @@ mod tests {
         .unwrap();
 
         // Empty store: the slot imports as the first account, once.
-        let imported = load_with_imported_single_login_from(&base, "copilot");
+        let imported = load_with_imported_single_login_from(&base, family);
         assert_eq!(imported.len(), 1);
         assert_eq!(imported[0].account_id, "42");
-        assert_eq!(load_from(&base, "copilot").len(), 1,
+        assert_eq!(load_from(&base, family).len(), 1,
             "refresh-token writeback must find a durable account row");
 
         // A store copy of the SAME account wins over the slot import.
-        save_to(&base, "copilot", &[account("42", "Named")]).unwrap();
-        let merged = load_with_imported_single_login_from(&base, "copilot");
+        save_to(&base, family, &[account("42", "Named")]).unwrap();
+        let merged = load_with_imported_single_login_from(&base, family);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].label, "Named");
         let _ = std::fs::remove_dir_all(&base);
