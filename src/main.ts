@@ -1528,21 +1528,10 @@ let wbWebStatus: { enabled: boolean; has_cookie: boolean; chrome_major: number |
 /// Pack id while its download runs; blocks a second parallel download.
 let skinDownloading: string | null = null;
 
-/// #107 storefront. The workshop lives on its own Settings page; these hold
-/// only view state, never a copy of the pack registry.
-type SkinShopView = "masonry" | "grid";
-const SKIN_SHOP_VIEW_KEY = "pane.skins.view";
+/// #107 storefront. The workshop lives on its own Settings page.
 /// A sentinel that cannot be a pack id (validSkinId requires a letter/digit
 /// first), so a local pack named "native" can never collide with this row.
 const SKIN_SHOP_NATIVE = "__native";
-function readSkinShopView(): SkinShopView {
-  try {
-    return localStorage.getItem(SKIN_SHOP_VIEW_KEY) === "grid" ? "grid" : "masonry";
-  } catch {
-    return "masonry";
-  }
-}
-let skinShopView: SkinShopView = readSkinShopView();
 let skinShopSearch = "";
 let skinShopSelected: string | null = null;
 let skinShopZoom: { id: string; page: SkinPreviewPage; mode: "light" | "dark" } | null = null;
@@ -11024,9 +11013,11 @@ function focusRoomHeight(scroller: HTMLElement): number {
   const gap = parseFloat(getComputedStyle(scroller).rowGap) || 0;
   return spacer + gap;
 }
-function focusNavigationTarget(selector: string, scrollerSelector: string): void {
+/// Centre `target` in `scroller` and ring it. Pass a selector, or the element
+/// itself when it has no stable selector (a rendered-in-place group).
+function focusNavigationTarget(selector: string | HTMLElement, scrollerSelector: string): void {
   navigationFocusCleanup();
-  const target = document.querySelector<HTMLElement>(selector);
+  const target = typeof selector === "string" ? document.querySelector<HTMLElement>(selector) : selector;
   const scroller = document.querySelector<HTMLElement>(scrollerSelector);
   if (!target || !scroller) return;
   // Leave enough scroll range to center even the first/last settings entry.
@@ -11052,7 +11043,12 @@ function focusNavigationTarget(selector: string, scrollerSelector: string): void
   }
   let expiry = 0;
   let observer: MutationObserver | undefined;
-  const paint = () => document.querySelector<HTMLElement>(selector)?.classList.add("navigation-focus-target");
+  const paint = () => {
+    // Re-resolve when given a selector: the board re-renders on every refresh,
+    // so the node from click time may be gone. A direct element is used as-is.
+    (typeof selector === "string" ? document.querySelector<HTMLElement>(selector) : selector)
+      ?.classList.add("navigation-focus-target");
+  };
   navigationFocusCleanup = () => {
     cancelAnimationFrame(overviewJumpFrame);
     window.clearTimeout(expiry);
@@ -14225,10 +14221,6 @@ function renderSkinShopGallery(entries: SkinShopEntry[]): string {
   const cards = entries.map((entry) => renderSkinShopCard(entry)).join("");
   return `<div class="skin-shop-head">
       <div class="skin-shop-intro"><h2>${escapeHtml(t("skin.market"))}</h2><p>${escapeHtml(t("skin.shopDesc"))}</p></div>
-      <div class="skin-preview-toolbar skin-shop-viewbar" role="group" aria-label="${escapeHtml(t("skin.shopLayout"))}">
-        <button class="skin-mode-btn" type="button" data-skin-shop-view="masonry" aria-pressed="${skinShopView === "masonry"}">${uiIcon("columns")}<span>${escapeHtml(t("skin.shopMasonry"))}</span></button>
-        <button class="skin-mode-btn" type="button" data-skin-shop-view="grid" aria-pressed="${skinShopView === "grid"}">${uiIcon("rows")}<span>${escapeHtml(t("skin.shopGrid"))}</span></button>
-      </div>
     </div>
     <div class="skin-shop-tools">
       <label class="skin-shop-search">${uiIcon("magnifyingGlass")}<input type="search" spellcheck="false" autocomplete="off" data-skin-shop-search value="${escapeHtml(skinShopSearch)}" placeholder="${escapeHtml(t("skin.shopSearch"))}" aria-label="${escapeHtml(t("skin.shopSearch"))}" /></label>
@@ -14236,7 +14228,7 @@ function renderSkinShopGallery(entries: SkinShopEntry[]): string {
       <button class="skin-shop-refresh" type="button" data-skin-shop-refresh ${refreshing ? "disabled" : ""}>${uiIcon("arrowsClockwise")}<span>${escapeHtml(refreshing ? t("skin.shopLoading") : t("skin.shopRefresh"))}</span></button>
     </div>
     ${feedback}${missing}${note}
-    <div class="skin-shop-gallery is-${skinShopView}" id="skin-shop-gallery">${cards}</div>
+    <div class="skin-shop-gallery" id="skin-shop-gallery">${cards}</div>
     <p class="skin-shop-empty" id="skin-shop-empty" hidden><strong>${escapeHtml(t("skin.shopNoResults", { q: skinShopSearch.trim() }))}</strong></p>`;
 }
 
@@ -14490,16 +14482,6 @@ async function refreshSkinShopIndex(): Promise<void> {
 }
 
 async function handleSkinShopClick(target: HTMLElement): Promise<void> {
-  const view = target.closest<HTMLElement>("[data-skin-shop-view]")?.dataset.skinShopView;
-  if (view === "masonry" || view === "grid") {
-    skinShopView = view;
-    try {
-      localStorage.setItem(SKIN_SHOP_VIEW_KEY, view);
-    } catch { /* private mode: the choice lasts this session */ }
-    renderSkinShop();
-    document.querySelector<HTMLElement>(`[data-skin-shop-view="${view}"]`)?.focus({ preventScroll: true });
-    return;
-  }
   const open = target.closest<HTMLElement>("[data-skin-shop-open]")?.dataset.skinShopOpen;
   if (open) {
     openSkinShopDetail(open);
@@ -22269,11 +22251,14 @@ function buildPanelShell(): void {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-skey-letter]");
     if (!button || button.disabled) return;
     const letter = button.dataset.skeyLetter!;
-    document
-      .querySelector<HTMLElement>(
-        `#panel-keys-rows [data-skey-heading="${CSS.escape(letter)}"]`,
-      )
-      ?.scrollIntoView({ block: "start", behavior: reduceMotion() ? "auto" : scrollBehavior() });
+    // Ring the whole letter group, not the 11px heading alone: a provider card
+    // highlights as a card, so its index should highlight as a group. The
+    // jump is the shared centring one — `scrollIntoView` parked the heading
+    // against the top edge with nothing to mark it.
+    const group = document.querySelector<HTMLElement>(
+      `#panel-keys-rows [data-skey-heading="${CSS.escape(letter)}"]`,
+    )?.closest<HTMLElement>(".skey-letter-group");
+    if (group) focusNavigationTarget(group, "#panel-scroll");
   });
   const providerKeys = panelBlock("st-kv-providers", "settings.keysProviders", "panel.desc.usage");
   const pkPad = document.createElement("div");

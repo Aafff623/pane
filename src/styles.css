@@ -10137,6 +10137,13 @@ body.panel-form #drawer {
   cursor: default;
 }
 .skey-letter-group + .skey-letter-group { margin-top: 10px; }
+/* The A–Z rail rings the whole group, not the 11px heading: a provider card
+   highlights as a card, so its index highlights as a group. The group has no
+   padding of its own, so the ring needs a nudge outward to clear the rows. */
+.skey-letter-group.navigation-focus-target {
+  border-radius: 8px;
+  outline-offset: 4px;
+}
 .skey-letter-heading {
   margin: 0;
   padding: 7px 2px;

@@ -129,17 +129,15 @@ body.reduce-anim .skin-sample { animation:none; }
 .skin-shop-note.is-loading .ui-icon { animation:skin-shop-spin 1s linear infinite; }
 @keyframes skin-shop-spin { to { transform:rotate(360deg); } }
 
-/* Masonry is two wide columns; grid is compact uniform cells. Card size and
-   preview height differ enough to read as two real modes, not a toggle. */
-.skin-shop-gallery.is-masonry { columns:2; column-gap:18px; }
-.skin-shop-gallery.is-masonry .skin-card { break-inside:avoid; display:block; width:100%; margin:0 0 18px; }
-.skin-shop-gallery.is-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(196px,1fr)); gap:16px; }
+/* One layout: uniform compact cells. The two-column masonry was a second mode
+   behind a toggle; the grid is what the storefront actually reads as. */
+.skin-shop-gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(196px,1fr)); gap:16px; }
 .skin-card { position:relative; overflow:hidden; border:1px solid var(--border); border-radius:14px; background:var(--card); color:inherit; text-align:left; cursor:pointer; transition:transform .16s ease, border-color .16s ease, box-shadow .16s ease; }
 .skin-card:hover { transform:translateY(-2px); border-color:color-mix(in oklab, var(--accent) 50%, var(--border)); box-shadow:0 10px 24px rgb(0 0 0 / .10); }
 .skin-card:focus-visible { outline:2px solid var(--primary); outline-offset:3px; }
 .skin-card.is-applied { border-color:color-mix(in oklab, var(--primary) 55%, var(--border)); }
 .skin-card-shot { --shot-scale:.9; position:relative; height:320px; overflow:hidden; border-bottom:1px solid var(--border); background:radial-gradient(120% 80% at 50% 0, color-mix(in oklab, var(--muted) 65%, transparent), var(--card)); }
-.skin-shop-gallery.is-grid .skin-card-shot { --shot-scale:.62; height:210px; }
+.skin-shop-gallery .skin-card-shot { --shot-scale:.62; height:210px; }
 .skin-card-shot.is-empty { display:grid; place-items:center; padding:18px; }
 .skin-shot-canvas { position:relative; width:100%; height:100%; overflow:hidden; }
 .skin-shot-canvas > .skin-sample { position:absolute; top:0; left:50%; width:360px; min-width:360px; transform:translateX(-50%) scale(var(--shot-scale,.62)); transform-origin:top center; pointer-events:none; animation:none; border-radius:0; }
