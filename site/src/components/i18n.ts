@@ -123,6 +123,7 @@ export const messages = {
       description: "This is Pane's real front-end build with fixed sample data. Switch tabs, periods, settings and themes; nothing connects to your accounts.",
       open: "Open in a new tab",
       note: "Sample data · no real accounts",
+      frameTitle: "Pane panel demo",
     },
     footer: {
       product: "Product",
@@ -267,6 +268,7 @@ export const messages = {
       description: "这是 Pane 的真实前端构建，使用固定的示例数据。可以切换标签、周期、设置与主题，不会连接你的真实账户。",
       open: "新窗口打开",
       note: "示例数据 · 不连接真实账户",
+      frameTitle: "Pane 面板演示",
     },
     footer: {
       product: "产品",

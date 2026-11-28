@@ -3,7 +3,7 @@ import { PaneDemoFrame } from "@/components/pane-demo-frame";
 
 export function DemoEmbed({ lang }: { lang: Lang }) {
   const copy = messages[lang].demoPage;
-  const src = `/pane-demo/index.html?theme=light&lang=${lang}`;
+  const src = `/pane-demo/index.html?lang=${lang}`;
 
   return (
     <div className="border-border bg-card overflow-hidden rounded-2xl border shadow-lg">
@@ -23,7 +23,10 @@ export function DemoEmbed({ lang }: { lang: Lang }) {
       </div>
       <div className="bg-muted/40 flex justify-center px-4 py-8 sm:py-12">
         <div className="border-border bg-background w-full max-w-[460px] overflow-hidden rounded-xl border shadow-xl">
-          <PaneDemoFrame lang={lang} title="Pane demo" className="h-[660px] w-full" />
+          {/* A fixed height only shows the top of the panel; the frame scrolls
+              internally, so give phones nearly the whole viewport and cap it on
+              desktop where the panel's own scroll area takes over. */}
+          <PaneDemoFrame lang={lang} title={copy.frameTitle} className="h-[min(660px,calc(100dvh-13rem))] min-h-[420px] w-full" />
         </div>
       </div>
     </div>
