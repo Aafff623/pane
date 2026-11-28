@@ -116,14 +116,39 @@ test("Escape closes the dialog and restores focus to the opener", () => {
   const { mountDialogShell } = load();
   const trigger = makeEl("button");
   doc.activeElement = trigger;
-  const shell = mountDialogShell();
   let closed = 0;
-  const shellWithCallback = mountDialogShell({ onClose: () => { closed += 1; } });
+  mountDialogShell({ onClose: () => { closed += 1; } });
   doc.dispatch("keydown", { key: "Escape", preventDefault() {}, stopPropagation() {} });
-  assert.equal(shell.host.isConnected, false, "Escape removes the host");
+  assert.equal(doc.body.children.length, 0, "Escape removes the host");
   assert.equal(doc.activeElement, trigger, "focus returns to whatever opened it");
   assert.equal(closed, 1, "onClose fires exactly once");
-  void shellWithCallback;
+});
+
+test("one Escape closes only the topmost of two stacked dialogs", () => {
+  reset();
+  const { mountDialogShell } = load();
+  const order = [];
+  mountDialogShell({ onClose: () => order.push("outer") });
+  const inner = mountDialogShell({ onClose: () => order.push("inner") });
+  doc.dispatch("keydown", { key: "Escape", preventDefault() {}, stopPropagation() {} });
+  assert.deepEqual(order, ["inner"], "the outer dialog must survive the first Escape");
+  assert.equal(doc.body.children.includes(inner.host), false);
+  doc.dispatch("keydown", { key: "Escape", preventDefault() {}, stopPropagation() {} });
+  assert.deepEqual(order, ["inner", "outer"], "the second Escape reaches the outer dialog");
+  assert.equal(doc.body.children.length, 0);
+});
+
+test("closing out of order releases the right stack frame", () => {
+  reset();
+  const { mountDialogShell } = load();
+  const order = [];
+  const outer = mountDialogShell({ onClose: () => order.push("outer") });
+  mountDialogShell({ onClose: () => order.push("inner") });
+  // A programmatic close of the OUTER dialog while the inner one is on top.
+  outer.close();
+  assert.deepEqual(order, ["outer"]);
+  doc.dispatch("keydown", { key: "Escape", preventDefault() {}, stopPropagation() {} });
+  assert.deepEqual(order, ["outer", "inner"], "the inner dialog is still the top one");
 });
 
 test("Tab wraps at both edges and never escapes a modal", () => {
@@ -198,6 +223,31 @@ test("background scrolling is locked while a modal is open", () => {
   assert.equal(doc.body.style.overflow, "", "the previous value comes back");
   unlock();
   assert.equal(doc.body.style.overflow, "", "unlocking twice is safe");
+});
+
+test("two stacked dialogs release the scroll lock only when both close", () => {
+  reset();
+  const { lockBackgroundScroll } = load();
+  doc.body.style.overflow = "";
+  const outer = lockBackgroundScroll();
+  const inner = lockBackgroundScroll();
+  inner();
+  // Save/restore would have written "hidden" back here and left the page
+  // unscrollable after both dialogs closed.
+  assert.equal(doc.body.style.overflow, "hidden", "one lock still held");
+  outer();
+  assert.equal(doc.body.style.overflow, "", "the board scrolls again");
+});
+
+test("the scroll lock restores a non-default previous overflow", () => {
+  reset();
+  const { lockBackgroundScroll } = load();
+  doc.body.style.overflow = "auto";
+  const unlock = lockBackgroundScroll();
+  assert.equal(doc.body.style.overflow, "hidden");
+  unlock();
+  assert.equal(doc.body.style.overflow, "auto");
+  doc.body.style.overflow = "";
 });
 
 test("canClose vetoes a dismissal but not an explicit close", () => {

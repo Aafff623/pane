@@ -6157,8 +6157,12 @@ function renderRtkSetup(): string {
         })
         .join("")
     : `<p class="rtk-projects-note">${escapeHtml(t("rtk.targetsLoading"))}</p>`;
+  // Not `aria-modal`: this panel is injected into the board markup rather than
+  // mounted through the shell, so it traps nothing and the board behind it
+  // stays interactive. Claiming modality made screen readers hide content the
+  // user can still reach.
   return `<div class="rtk-setup-overlay" data-rtk-setup-overlay>
-    <section class="rtk-setup-dialog" role="dialog" aria-modal="true" aria-labelledby="rtk-setup-title">
+    <section class="rtk-setup-dialog" role="dialog" aria-labelledby="rtk-setup-title">
       <div class="rtk-setup-head">
         <div class="rtk-dialog-title">
           <span class="rtk-dialog-mark" aria-hidden="true">${uiIcon("terminal")}</span>
@@ -7375,8 +7379,8 @@ function maybePromptUpdate(version: string, manual = false): void {
   const shell = mountDialogShell({ overlayId: "update-overlay" });
   const overlay = shell.host;
   overlay.innerHTML = `
-    <div id="update-box" role="dialog" aria-modal="true">
-      <h3>${escapeHtml(t("update.availableTitle", { version }))}</h3>
+    <div id="update-box" role="dialog" aria-modal="true" aria-labelledby="update-title">
+      <h3 id="update-title">${escapeHtml(t("update.availableTitle", { version }))}</h3>
       <p>${escapeHtml(t("update.availableBody", { version }))}</p>
       <div id="update-actions">
         <button id="update-later" class="mini-btn" type="button">${escapeHtml(t("update.later"))}</button>
@@ -7483,8 +7487,8 @@ function appConfirm(opts: {
       ? `<label class="confirm-checkbox-row"><input type="checkbox" id="confirm-checkbox" ${opts.checkboxDefault !== false ? "checked" : ""}><span>${escapeHtml(opts.checkboxLabel)}</span></label>`
       : "";
     overlay.innerHTML = `
-      <div id="confirm-box" role="dialog" aria-modal="true">
-        <h3>${escapeHtml(opts.title)}</h3>
+      <div id="confirm-box" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+        <h3 id="confirm-title">${escapeHtml(opts.title)}</h3>
         <p>${escapeHtml(opts.message)}</p>
         ${checkboxHtml}
         <div id="confirm-actions">
@@ -7546,8 +7550,8 @@ function appPrompt(opts: {
     });
     const overlay = shell.host;
     overlay.innerHTML = `
-      <div id="confirm-box" role="dialog" aria-modal="true">
-        <h3>${escapeHtml(opts.title)}</h3>
+      <div id="confirm-box" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+        <h3 id="confirm-title">${escapeHtml(opts.title)}</h3>
         <input id="prompt-input" class="form-input" type="${opts.secret ? "password" : "text"}" spellcheck="false" autocomplete="off" />
         <div id="confirm-actions">
           <button id="confirm-cancel" class="mini-btn" type="button">${escapeHtml(t("dialog.cancel"))}</button>
@@ -7744,8 +7748,8 @@ function appProviderPicker(
       })
       .join("");
     overlay.innerHTML = `
-      <div id="confirm-box" class="picker-box" role="dialog" aria-modal="true">
-        <h3>${escapeHtml(opts.title)}</h3>
+      <div id="confirm-box" class="picker-box" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+        <h3 id="confirm-title">${escapeHtml(opts.title)}</h3>
         <p>${escapeHtml(opts.note)}</p>
         <div class="picker-filters" role="group" aria-label="${escapeHtml(t("picker.filterLabel"))}">${chipsHtml}</div>
         <div class="picker-list">
@@ -8158,6 +8162,9 @@ function openGroupManagementPanel(): void {
       }
     }
   });
+  // Without this the modal is announced but focus stays on the card behind it,
+  // so the Tab trap never engages (it only intercepts at the dialog's edges).
+  shell.focusFirst(overlay.querySelector<HTMLElement>(".group-menu-item"));
 }
 
 const shortcutPlatform = currentShortcutPlatform();
@@ -8699,7 +8706,7 @@ function openGroupMenu(
   const targetAccount = managedAccountForCard(fam, shownId, accounts);
   const accountIndex = targetAccount ? accounts.indexOf(targetAccount) : -1;
   const item = (gid: string, label: string, checked = false) =>
-    `<button class="group-menu-item${checked ? " on" : ""}" data-group-pick="${escapeHtml(gid)}">
+    `<button type="button" role="menuitemradio" aria-checked="${checked}" class="group-menu-item${checked ? " on" : ""}" data-group-pick="${escapeHtml(gid)}">
        <span class="group-menu-check">${checked ? "✓" : ""}</span>${escapeHtml(label)}
      </button>`;
   const fallbackName = providerDisplayName(fam) || cardId;
@@ -8724,21 +8731,21 @@ function openGroupMenu(
     <div class="group-menu${includeGrouping ? " overview-move-menu" : ""}" role="menu">
       <div class="group-menu-title">${escapeHtml(t(includeGrouping ? "overview.moveGroup" : "customize.cardSettings"))}</div>
       ${groupingHtml}
-      ${includeGrouping ? "" : `<button class="group-menu-item" data-card-config="${escapeHtml(fam)}"><span class="group-menu-check">＋</span>${escapeHtml(t(supportsExtraAccounts(fam) ? "customize.acctAdd" : "customize.addCredential"))}</button>`}
+      ${includeGrouping ? "" : `<button class="group-menu-item" role="menuitem" data-card-config="${escapeHtml(fam)}"><span class="group-menu-check">＋</span>${escapeHtml(t(supportsExtraAccounts(fam) ? "customize.acctAdd" : "customize.addCredential"))}</button>`}
       <div class="group-menu-sep"></div>
-      <button class="group-menu-item" data-card-note="${escapeHtml(cardId)}">
+      <button class="group-menu-item" role="menuitem" data-card-note="${escapeHtml(cardId)}">
         <span class="group-menu-check">✎</span>${escapeHtml(t("customize.noteProviderMenu"))}
       </button>
-      ${contextAccount ? `<button class="group-menu-item" data-card-acct-note="${escapeHtml(contextAccount)}">
+      ${contextAccount ? `<button class="group-menu-item" role="menuitem" data-card-acct-note="${escapeHtml(contextAccount)}">
         <span class="group-menu-check">✎</span><span class="group-menu-label">${escapeHtml(t("customize.noteAccountMenu"))} · ${escapeHtml(labelForAccount(contextAccount, accounts))}</span>
       </button>` : ""}
-      ${contextAccount ? `<button class="group-menu-item" data-card-pin-acct="${escapeHtml(contextAccount)}"><span class="group-menu-check">★</span><span class="group-menu-label">${escapeHtml(t(providerLayout(fam).pinnedAccount === contextAccount ? "customize.acctUnpin" : "customize.acctPin"))} · ${escapeHtml(labelForAccount(contextAccount, accounts))}</span></button>` : ""}
-      ${includeGrouping ? "" : `<button class="group-menu-item" data-card-help="${escapeHtml(fam)}"><span class="group-menu-check">?</span>${escapeHtml(t("customize.helpMenu"))}</button><button class="group-menu-item" data-card-test="${escapeHtml(shownId)}"><span class="group-menu-check">⚡</span>${escapeHtml(t("customize.testConnection"))}</button>`}
+      ${contextAccount ? `<button type="button" role="menuitemradio" aria-checked="${providerLayout(fam).pinnedAccount === contextAccount}" class="group-menu-item" data-card-pin-acct="${escapeHtml(contextAccount)}"><span class="group-menu-check">★</span><span class="group-menu-label">${escapeHtml(t(providerLayout(fam).pinnedAccount === contextAccount ? "customize.acctUnpin" : "customize.acctPin"))} · ${escapeHtml(labelForAccount(contextAccount, accounts))}</span></button>` : ""}
+      ${includeGrouping ? "" : `<button class="group-menu-item" role="menuitem" data-card-help="${escapeHtml(fam)}"><span class="group-menu-check">?</span>${escapeHtml(t("customize.helpMenu"))}</button><button class="group-menu-item" role="menuitem" data-card-test="${escapeHtml(shownId)}"><span class="group-menu-check">⚡</span>${escapeHtml(t("customize.testConnection"))}</button>`}
       ${includeGrouping ? "" : `<div class="group-menu-sep"></div>
-      ${accountIndex >= 0 ? `<button class="group-menu-item" data-card-acct-archive="${accountIndex}"><span class="group-menu-check">⬇</span><span class="group-menu-label">${escapeHtml(t("customize.acctArchive"))} · ${escapeHtml(labelForAccount(shownId, accounts))}</span></button>` : ""}
+      ${accountIndex >= 0 ? `<button class="group-menu-item" role="menuitem" data-card-acct-archive="${accountIndex}"><span class="group-menu-check">⬇</span><span class="group-menu-label">${escapeHtml(t("customize.acctArchive"))} · ${escapeHtml(labelForAccount(shownId, accounts))}</span></button>` : ""}
       <div class="group-menu-sep"></div>
-      ${accountIndex >= 0 ? `<button class="group-menu-item danger" data-card-account-remove="${accountIndex}"><span class="group-menu-check">×</span><span class="group-menu-label">${escapeHtml(t("customize.acctDelete"))} · ${escapeHtml(labelForAccount(shownId, accounts))}</span></button>` : ""}
-      <button class="group-menu-item danger" data-card-remove="${escapeHtml(cardId)}">
+      ${accountIndex >= 0 ? `<button class="group-menu-item danger" role="menuitem" data-card-account-remove="${accountIndex}"><span class="group-menu-check">×</span><span class="group-menu-label">${escapeHtml(t("customize.acctDelete"))} · ${escapeHtml(labelForAccount(shownId, accounts))}</span></button>` : ""}
+      <button class="group-menu-item danger" role="menuitem" data-card-remove="${escapeHtml(cardId)}">
         <span class="group-menu-check">×</span>${escapeHtml(cardId.includes("@") ? t("customize.acctDelete") : t("customize.providerDelete"))}
       </button>`}
     </div>`;
@@ -8952,8 +8959,8 @@ function openPeakHelp(anchor: HTMLElement): void {
   dismissGroupMenu = shell.close;
   const overlay = shell.host;
   overlay.innerHTML = `
-    <div class="group-menu peak-help" role="dialog">
-      <div class="group-menu-title">${escapeHtml(t("peak.helpTitle"))}</div>
+    <div class="group-menu peak-help" role="dialog" aria-labelledby="peak-help-title">
+      <div class="group-menu-title" id="peak-help-title">${escapeHtml(t("peak.helpTitle"))}</div>
       ${rows || `<div class="peak-help-empty">${escapeHtml(t("peak.helpEmpty"))}</div>`}
     </div>`;
   overlay.addEventListener("click", (e) => {
@@ -9791,7 +9798,7 @@ function openShareRangeMenu(anchor: HTMLElement): void {
       ${(Object.keys(SHARE_RANGE_LABEL) as ShareRange[])
         .map(
           (r) =>
-            `<button type="button" class="group-menu-item${r === current ? " on" : ""}" data-share-range="${r}"><span class="group-menu-check">${r === current ? "✓" : ""}</span>${escapeHtml(t(SHARE_RANGE_LABEL[r]))}</button>`,
+            `<button type="button" role="menuitemradio" aria-checked="${r === current}" class="group-menu-item${r === current ? " on" : ""}" data-share-range="${r}"><span class="group-menu-check">${r === current ? "✓" : ""}</span>${escapeHtml(t(SHARE_RANGE_LABEL[r]))}</button>`,
         )
         .join("")}
     </div>`;
@@ -9884,6 +9891,11 @@ function maybeShowFontGuide(): boolean {
         cancel: fresh ? undefined : t("fontGuide.decline"),
         accept: () => complete(!fresh), dismiss: () => complete(false),
       },
+      // Escape takes the shell's own path, which never runs the actions above.
+      // Without this, `pendingFontGuide` stayed "new" and the guide came back
+      // on the next `maybeStartTour()` — the dialog was undismissable in
+      // practice. Declining is the same answer as the ✕.
+      onClose: () => complete(false),
     });
   return true;
 }
@@ -9996,7 +10008,14 @@ function showConfigNotice(): void {
       accept: () => applyConfigDefaults(true),
       dismiss: () => applyConfigDefaults(false),
     },
-    onClose: () => { pendingFontGuide = "skip"; noticeClosed(); },
+    // Escape reaches here instead of the actions. The version must still be
+    // recorded, or the notice re-opens on every launch; declining is the same
+    // answer as "keep current", which writes the value without changing it.
+    onClose: () => {
+      pendingFontGuide = "skip";
+      if (config.configNoticeVersion !== appVersion) void patchConfig({ configNoticeVersion: appVersion });
+      noticeClosed();
+    },
   });
 }
 
@@ -12491,7 +12510,14 @@ function labelForAccount(id: string, list: AccountEntry[], fallback = ""): strin
 /// import (cockpit-compatible field aliases).
 function openCursorAccountDialog(): void {
   dismissAccountDialog?.();
-  const shell = mountDialogShell({ overlayId: "account-overlay" });
+  // Escape must run the same teardown as the ✕ button: without `done()` the
+  // OAuth poll timer keeps ticking and the backend login is never cancelled,
+  // so a start-then-Escape leaves a poll running against a dead overlay.
+  let leave = () => {};
+  const shell = mountDialogShell({
+    overlayId: "account-overlay",
+    onClose: () => leave(),
+  });
   const overlay = shell.host;
   overlay.innerHTML = `
     <section class="account-dialog" role="dialog" aria-modal="true" aria-labelledby="cursor-account-title">
@@ -12544,7 +12570,14 @@ function openCursorAccountDialog(): void {
     if (dismissAccountDialog === done) dismissAccountDialog = null;
     shell.close();
   };
+  // The shell's `onClose` fires from `close()`; `leave` runs the teardown that
+  // `done` owns. It is idempotent through `closed`.
+  leave = done;
   dismissAccountDialog = done;
+
+  // Focus the first tab so the Tab trap and the radio-group arrow keys work;
+  // otherwise focus stays on the card behind the modal.
+  shell.focusFirst(overlay.querySelector<HTMLElement>("[data-cursor-tab]"));
 
   // Shared success tail for all three import paths: refresh the account
   // list, close the dialog, force a quota refresh.
@@ -13348,7 +13381,7 @@ function openGroupPicker(cardId: string, anchor: HTMLElement): void {
   closeGroupMenu();
   const current = cardGroupId(cardId);
   const item = (gid: string, label: string, checked = false) =>
-    `<button class="group-menu-item${checked ? " on" : ""}" data-group-pick="${escapeHtml(gid)}"><span class="group-menu-check">${checked ? "✓" : ""}</span>${escapeHtml(label)}</button>`;
+    `<button type="button" role="menuitemradio" aria-checked="${checked}" class="group-menu-item${checked ? " on" : ""}" data-group-pick="${escapeHtml(gid)}"><span class="group-menu-check">${checked ? "✓" : ""}</span>${escapeHtml(label)}</button>`;
   const unlockScroll = lockBackgroundScroll();
   const shell = mountDialogShell({
     overlayClass: "group-menu-overlay",
@@ -17979,11 +18012,11 @@ function vaultSetupWizard(): void {
   });
   const overlay = shell.host;
   overlay.innerHTML = `
-    <div id="vault-setup-box" role="dialog" aria-modal="true">
+    <div id="vault-setup-box" role="dialog" aria-modal="true" aria-labelledby="vault-setup-title">
       <datalist id="vault-setup-presets">${RECOVERY_PRESET_KEYS.map(
         (k) => `<option value="${escapeHtml(t(k))}"></option>`,
       ).join("")}</datalist>
-      <h3>${escapeHtml(t("settings.kvWizardTitle"))}</h3>
+      <h3 id="vault-setup-title">${escapeHtml(t("settings.kvWizardTitle"))}</h3>
       <p class="vault-steps" id="vault-setup-steps"></p>
       <div id="vault-setup-body"></div>
       <p class="vault-setup-error" id="vault-setup-error" hidden></p>
@@ -18413,13 +18446,14 @@ function vaultModalShell(id: string, title: string): {
   err: HTMLElement;
   submit: HTMLButtonElement;
   close: () => void;
+  focusBody: () => void;
 } | null {
   if (document.querySelector(`#${id}-overlay`)) return null;
   const shell = mountDialogShell({ overlayId: `${id}-overlay` });
   const overlay = shell.host;
   overlay.innerHTML = `
-    <div id="${id}-box" role="dialog" aria-modal="true">
-      <h3>${escapeHtml(title)}</h3>
+    <div id="${id}-box" role="dialog" aria-modal="true" aria-labelledby="${id}-title">
+      <h3 id="${id}-title">${escapeHtml(title)}</h3>
       <div id="${id}-body"></div>
       <p class="vault-setup-error" id="${id}-error" hidden></p>
       <div class="kv-recovery-actions">
@@ -18431,6 +18465,9 @@ function vaultModalShell(id: string, title: string): {
   const close = shell.close;
   overlay.querySelector(`#${id}-cancel`)?.addEventListener("click", close);
   return {
+    /// The body is filled after an `await`, so the caller focuses once its
+    /// inputs exist — focusing at mount would land on an empty container.
+    focusBody: () => shell.focusFirst(overlay.querySelector<HTMLElement>(`#${id}-body`)),
     overlay,
     body: overlay.querySelector<HTMLElement>(`#${id}-body`)!,
     err: overlay.querySelector<HTMLElement>(`#${id}-error`)!,
@@ -18479,6 +18516,7 @@ async function vaultResetDialog(): Promise<void> {
     <p class="kv-hint">${escapeHtml(t("settings.kvV3ForgotHint"))}</p>
     ${qRows ? `<div class="kv-recovery-rows">${qRows}</div>` : ""}
     ${codeBlock}`;
+  shell.focusBody();
   shell.submit.textContent = t("settings.kvV3ResetSubmit");
   // TXT upload: read the file, lift the code, fill both inputs.
   shell.body.querySelector("[data-v3r-upload]")?.addEventListener("click", () => {
@@ -18574,6 +18612,7 @@ async function recoveryChallengeDialog(): Promise<void> {
     </div>`,
       )
       .join("")}`;
+  shell.focusBody();
   shell.submit.textContent = t("settings.kvForgotSubmit");
   shell.submit.addEventListener("click", () => void submitRecoveryChallenge(shell));
 }
@@ -21120,6 +21159,11 @@ function pillControl<T extends string>(
   pill.append(thumb);
   const buttons: HTMLButtonElement[] = [];
   const sync = (value: T) => {
+    // A persisted value can be absent from `options` (an older build wrote a
+    // size or form this version no longer offers). With plain roving
+    // tabindex, every button would then be -1 and the control would be
+    // untabbable. Fall back to the first option as the single entry point.
+    const known = options.some((option) => option.value === value);
     for (const button of buttons) {
       const on = button.dataset.value === value;
       button.classList.toggle("active", on);
@@ -21127,6 +21171,7 @@ function pillControl<T extends string>(
       // Roving tabindex: one tab stop for the whole control, arrows move it.
       button.tabIndex = on ? 0 : -1;
     }
+    if (!known) buttons[0].tabIndex = 0;
     positionTabThumb(pill);
   };
   for (const option of options) {
@@ -21662,7 +21707,7 @@ function buildPanelShell(): void {
   }, true);
   const search = document.createElement("div");
   search.id = "panel-search-wrap";
-  search.innerHTML = `<span class="panel-search-icon" aria-hidden="true">${uiIcon("magnifyingGlass")}</span><input id="panel-search" class="form-input" type="search" spellcheck="false" autocomplete="off" data-i18n-placeholder="settings.searchPlaceholder" placeholder="${escapeHtml(t("settings.searchPlaceholder"))}" aria-controls="panel-search-results" /><div id="panel-search-results" role="listbox" hidden></div>`;
+  search.innerHTML = `<span class="panel-search-icon" aria-hidden="true">${uiIcon("magnifyingGlass")}</span><input id="panel-search" class="form-input" type="search" spellcheck="false" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="panel-search-results" data-i18n-placeholder="settings.searchPlaceholder" placeholder="${escapeHtml(t("settings.searchPlaceholder"))}" /><div id="panel-search-results" role="listbox" hidden></div>`;
   const windowControls = document.createElement("div");
   windowControls.className = "set-window-controls";
   const minBtn = document.createElement("button");
@@ -22589,6 +22634,8 @@ function setupPanelSearch(): void {
     results.hidden = true;
     results.innerHTML = "";
     selected = -1;
+    input.setAttribute("aria-expanded", "false");
+    input.removeAttribute("aria-activedescendant");
   };
   const render = () => {
     if (!matches.length) {
@@ -22599,10 +22646,17 @@ function setupPanelSearch(): void {
       results.hidden = !q;
       return;
     }
+    // Each result carries an id so the input can name the highlighted one via
+    // `aria-activedescendant` — without it a screen reader hears nothing as
+    // the arrow keys move through matches. `tabindex="-1"` keeps every result
+    // out of the tab order: a listbox is one tab stop, not twenty.
     results.innerHTML = matches
-      .map((entry, index) => `<button type="button" role="option" aria-selected="${index === selected}" class="set-search-hit${index === selected ? " on" : ""}" data-search-hit="${escapeHtml(entry.anchor)}"><span>${escapeHtml(entry.label)}</span><span class="set-search-section">${escapeHtml(entry.section)}</span></button>`)
+      .map((entry, index) => `<div role="option" tabindex="-1" id="panel-search-opt-${index}" aria-selected="${index === selected}" class="set-search-hit${index === selected ? " on" : ""}" data-search-hit="${escapeHtml(entry.anchor)}"><span>${escapeHtml(entry.label)}</span><span class="set-search-section">${escapeHtml(entry.section)}</span></div>`)
       .join("");
     results.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+    if (selected >= 0) input.setAttribute("aria-activedescendant", `panel-search-opt-${selected}`);
+    else input.removeAttribute("aria-activedescendant");
   };
   const query = () => input.value.trim().toLowerCase();
   const filter = () => {
@@ -23907,10 +23961,10 @@ function openAuthRowMenu(family: string, index: number, anchor: HTMLElement): vo
   const overlay = shell.host;
   overlay.innerHTML = `<div class="group-menu" role="menu">
     <div class="group-menu-title">${escapeHtml(name)}</div>
-    <button class="group-menu-item" type="button" data-auth-menu-rename="${escapeHtml(family)}|${escapeHtml(acct.id)}"><span class="group-menu-check">✎</span>${escapeHtml(t("auth.note"))}</button>
+    <button class="group-menu-item" type="button" role="menuitem" data-auth-menu-rename="${escapeHtml(family)}|${escapeHtml(acct.id)}"><span class="group-menu-check">✎</span>${escapeHtml(t("auth.note"))}</button>
     <div class="group-menu-sep"></div>
-    <button class="group-menu-item" type="button" data-auth-menu-archive="${escapeHtml(family)}|${index}"><span class="group-menu-check">↓</span>${escapeHtml(t("customize.acctArchive"))}</button>
-    <button class="group-menu-item danger" type="button" data-auth-menu-remove="${escapeHtml(family)}|${index}"><span class="group-menu-check">×</span>${escapeHtml(t("auth.remove"))}</button>
+    <button class="group-menu-item" type="button" role="menuitem" data-auth-menu-archive="${escapeHtml(family)}|${index}"><span class="group-menu-check">↓</span>${escapeHtml(t("customize.acctArchive"))}</button>
+    <button class="group-menu-item danger" type="button" role="menuitem" data-auth-menu-remove="${escapeHtml(family)}|${index}"><span class="group-menu-check">×</span>${escapeHtml(t("auth.remove"))}</button>
   </div>`;
   const close = shell.close;
   overlay.addEventListener("click", (e) => {

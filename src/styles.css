@@ -1893,6 +1893,16 @@ select:focus-visible {
   transform: scale(0.95);
 }
 
+/* Both trail controls removed their outline. They are the keyboard path
+   through the trend chart, so give them the same ring the rest of the app
+   uses instead of leaving focus invisible. */
+.trail-tick:focus-visible,
+.trail-more:focus-visible {
+  outline: 2px solid var(--navigation-focus-color, var(--primary));
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 .trail-more.top {
   margin-bottom: 2px;
 }

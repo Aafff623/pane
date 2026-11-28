@@ -32,6 +32,21 @@ function composing(e: KeyboardEvent): boolean {
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
 
+/// Mount order, so Escape and Tab only act on the topmost dialog.
+///
+/// Every shell listens on `document` in the capture phase. `stopPropagation()`
+/// does not stop another listener on the SAME node — only
+/// `stopImmediatePropagation()` does, and that would also break unrelated
+/// listeners. Two stacked dialogs (a group panel that opens a confirm) each
+/// used to consume one Escape, so one press closed both and the outer scroll
+/// lock was never released.
+const stack: symbol[] = [];
+
+function releaseFrame(frame: symbol): void {
+  const at = stack.lastIndexOf(frame);
+  if (at >= 0) stack.splice(at, 1);
+}
+
 /// Focusable descendants in DOM order, skipping nodes inside `hidden`/`inert`
 /// subtrees so a collapsed section cannot swallow Tab.
 function focusables(root: HTMLElement): HTMLElement[] {
@@ -67,11 +82,18 @@ export function mountDialogShell(
   if (options.overlayId) host.id = options.overlayId;
   host.className = options.overlayClass ?? "confirm-overlay";
 
+  /// This dialog's place in the mount order. A fresh symbol each time, so a
+  /// dialog that closes and reopens cannot be confused with its predecessor.
+  const frame = Symbol("dialog");
+  stack.push(frame);
+  const topmost = () => stack[stack.length - 1] === frame;
+
   let closed = false;
   const close = () => {
     if (closed) return;
     closed = true;
     document.removeEventListener("keydown", onKey, true);
+    releaseFrame(frame);
     host.remove();
     // The opener can be gone by now: the board re-renders on every refresh, so
     // the button that opened this dialog may have been replaced. Fall back to
@@ -97,6 +119,9 @@ export function mountDialogShell(
   const trapFocus = options.trapFocus !== false;
   const arrowKeys = options.arrowKeys === true;
   const onKey = (e: KeyboardEvent) => {
+    // Only the topmost dialog reacts. A confirm opened from inside a menu
+    // would otherwise see the same Escape as the menu underneath it.
+    if (!topmost()) return;
     if (e.key === "Escape") {
       // An IME candidate window closes with Escape too. Treating that as
       // "dismiss the dialog" swallowed the keystroke mid-composition, which is
@@ -155,14 +180,26 @@ export function mountDialogShell(
 /// Pane's overlays are `position: fixed` over a scrolling document, so a wheel
 /// event over the dimmed area still scrolled the board underneath. Returns the
 /// undo function; calling it twice is safe.
+///
+/// Reference-counted, not save/restore. Two stacked dialogs each saved
+/// `overflow: "hidden"` as "the previous value", so the inner one unlocking
+/// wrote `"hidden"` back and the outer one then wrote `"hidden"` again — the
+/// page stayed unscrollable after both closed.
+let scrollLocks = 0;
+let scrollLockPrevious = "";
+
 export function lockBackgroundScroll(): () => void {
   const body = document.body;
-  const previous = body.style.overflow;
-  body.style.overflow = "hidden";
+  if (scrollLocks === 0) {
+    scrollLockPrevious = body.style.overflow;
+    body.style.overflow = "hidden";
+  }
+  scrollLocks += 1;
   let done = false;
   return () => {
     if (done) return;
     done = true;
-    body.style.overflow = previous;
+    scrollLocks -= 1;
+    if (scrollLocks === 0) body.style.overflow = scrollLockPrevious;
   };
 }
