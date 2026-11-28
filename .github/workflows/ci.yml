@@ -73,6 +73,16 @@ jobs:
   # this dev machine's GNU toolchain can't link a test exe. MSVC on CI
   # links the release build fine (release.yml proves it), so this job is
   # what keeps the remaining tests alive.
+  #
+  # Serial, deliberately. The harness secretstore backend is one
+  # process-global `Mutex<HashMap>` and its keys are the product's keys
+  # (`provider:codex`, `token:oauth/copilot`), not test-local ones. Under
+  # cargo's default threads, tests in different modules write and remove the
+  # same slots and see each other's rows — measured on 2026-11-28: 1241
+  # passed / 2 failed, and a rerun failed a *different* pair, because the
+  # victims are whichever tests overlap. Namespacing every key would work
+  # but has to be repeated in every new test; one process is honest about
+  # what the backend is.
   src-tauri-tests:
     runs-on: windows-latest
     steps:
@@ -81,7 +91,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      - run: cargo test
+      - run: cargo test -- --test-threads=1
         working-directory: src-tauri
 
   # Site invariants: the Next static export must build, the Worker routes keep
